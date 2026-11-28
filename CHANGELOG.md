@@ -5,458 +5,71 @@
 
 ---
 
-## [3.6.65] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.64] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.63] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.62] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.61] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.60] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.59] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.58] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.57] — 2026-11-28
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.56] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.55] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.54] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.53] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.52] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.51] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.50] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.49] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.48] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.47] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.46] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.45] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.44] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.43] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.42] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.41] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.40] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.39] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.38] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.37] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.36] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.35] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.34] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.33] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.32] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.31] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.30] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.29] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.28] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.27] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.26] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.25] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.24] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.23] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.22] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.21] — 2026-11-27
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.20] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.19] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.18] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.17] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.16] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.15] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.14] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.13] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.12] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.11] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.10] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.9] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.8] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.7] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.6] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.5] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.4] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.3] — 2026-11-26
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.2] — 2026-11-25
-
-### Changed
-- _(none yet)_
-
----
-
-## [3.6.1] — 2026-11-25
-
-### Changed
-- _(none yet)_
+## [3.6.0-rc.7] — 2026-11-28
+
+Seventh release candidate of 3.6.0.
+
+### Added
+- The receiver app: Devices, Add computers, Receiver app shows the MSI
+  properties, the silent install command and a download with the
+  Support Agent MSI and an install.cmd. Rollout tokens admit many
+  computers up to a limit and an expiry; a device token can name a
+  folder and an organization. The app follows Session approval and the
+  new policy People can remove the app, and quick support can offer to
+  keep it on the computer.
+- Tickets from computers: the app opens, reads and answers its tickets;
+  the console lists them under From computers, names the person and the
+  computer, and the bell tells of new tickets and replies.
+- Feedback after quick support, with its questions under Settings,
+  Quick support and the answers under Help requests, Feedback.
+- Invites and password reset links by email, Forgot password on the
+  sign-in page, a page per user, bulk actions and CSV import and export
+  on Users, temporary passwords, required two-factor sign-in and end
+  dates per account, and Sign in as, which views the console as another
+  account, read-only.
+- The desktop app signs in through the web console.
+- The overview is a dashboard of widgets; accounts have several
+  dashboards and admins publish shared ones.
+- Teams in Team chat, made of people and user groups.
+- Fleet tasks, resources and compliance scans run on devices.
+- `rustdesk --deploy --token` joins stock RustDesk computers to Managed
+  and Locked servers, and the console's port answers the client API
+  under /client-api.
+- Several instances on one PostgreSQL database with Valkey or Redis
+  (`VALKEY_URL`).
+- `reset-password --reset-two-factor` in the server and all three
+  installers.
+
+### Changed
+- Port 21114 answers stock RustDesk clients without an API server on
+  every install; other hosts get only the client API there, and
+  `API_ALLOW_FROM` lets scripts in.
+- On Windows the server is a Windows service under its own account,
+  and the install folders are locked to administrators.
+- Settings pages save with a changes bar, show each setting's value and
+  source, and name their dependencies.
+- Every mail uses one branded layout in the reader's language and time
+  zone.
+- The viewer has one bar with labelled buttons, and Displays is the menu
+  for every device.
+- The chat has NeoDesk's own look and runs edge to edge on phones.
+- The console's and mails' accessibility follows WCAG 2.2 AA.
+- New Docker installs on Engine 27 or newer get IPv6; the Docker manager
+  owns its firewall ports.
+- The Linux installer asks every question first and keeps its five
+  newest backups.
+
+### Fixed
+- Linux installer backups are root-only.
+- A computer's chat socket closes when its token ends.
+- Revoked or blocked computers can't start quick support or join, and
+  the viewer says why a connection fails.
+- Fleet results take the device from its token.
+- The Sign in as session can't act as a normal session cookie.
+- Let's Encrypt runs end with the certificate they ask for.
+- Devices that waited in Managed mode can start sessions after a switch
+  to Open.
+- LDAP and single sign-on give the same role when mapped roles tie.
 
 ---
 
@@ -827,68 +440,4 @@ Second release candidate, and the first as NeoDesk.
 [3.6.0-rc.4]: https://github.com/neodeskapp/neodesk/compare/v3.6.0-rc.3...v3.6.0-rc.4
 [3.6.0-rc.5]: https://github.com/neodeskapp/neodesk/compare/v3.6.0-rc.4...v3.6.0-rc.5
 [3.6.0-rc.6]: https://github.com/neodeskapp/neodesk/compare/v3.6.0-rc.5...v3.6.0-rc.6
-[3.6.1]: https://github.com/neodeskapp/neodesk/compare/v3.6.0-rc.6...v3.6.1
-[3.6.2]: https://github.com/neodeskapp/neodesk/compare/v3.6.1...v3.6.2
-[3.6.3]: https://github.com/neodeskapp/neodesk/compare/v3.6.2...v3.6.3
-[3.6.4]: https://github.com/neodeskapp/neodesk/compare/v3.6.3...v3.6.4
-[3.6.5]: https://github.com/neodeskapp/neodesk/compare/v3.6.4...v3.6.5
-[3.6.6]: https://github.com/neodeskapp/neodesk/compare/v3.6.5...v3.6.6
-[3.6.7]: https://github.com/neodeskapp/neodesk/compare/v3.6.6...v3.6.7
-[3.6.8]: https://github.com/neodeskapp/neodesk/compare/v3.6.7...v3.6.8
-[3.6.9]: https://github.com/neodeskapp/neodesk/compare/v3.6.8...v3.6.9
-[3.6.10]: https://github.com/neodeskapp/neodesk/compare/v3.6.9...v3.6.10
-[3.6.11]: https://github.com/neodeskapp/neodesk/compare/v3.6.10...v3.6.11
-[3.6.12]: https://github.com/neodeskapp/neodesk/compare/v3.6.11...v3.6.12
-[3.6.13]: https://github.com/neodeskapp/neodesk/compare/v3.6.12...v3.6.13
-[3.6.14]: https://github.com/neodeskapp/neodesk/compare/v3.6.13...v3.6.14
-[3.6.15]: https://github.com/neodeskapp/neodesk/compare/v3.6.14...v3.6.15
-[3.6.16]: https://github.com/neodeskapp/neodesk/compare/v3.6.15...v3.6.16
-[3.6.17]: https://github.com/neodeskapp/neodesk/compare/v3.6.16...v3.6.17
-[3.6.18]: https://github.com/neodeskapp/neodesk/compare/v3.6.17...v3.6.18
-[3.6.19]: https://github.com/neodeskapp/neodesk/compare/v3.6.18...v3.6.19
-[3.6.20]: https://github.com/neodeskapp/neodesk/compare/v3.6.19...v3.6.20
-[3.6.21]: https://github.com/neodeskapp/neodesk/compare/v3.6.20...v3.6.21
-[3.6.22]: https://github.com/neodeskapp/neodesk/compare/v3.6.21...v3.6.22
-[3.6.23]: https://github.com/neodeskapp/neodesk/compare/v3.6.22...v3.6.23
-[3.6.24]: https://github.com/neodeskapp/neodesk/compare/v3.6.23...v3.6.24
-[3.6.25]: https://github.com/neodeskapp/neodesk/compare/v3.6.24...v3.6.25
-[3.6.26]: https://github.com/neodeskapp/neodesk/compare/v3.6.25...v3.6.26
-[3.6.27]: https://github.com/neodeskapp/neodesk/compare/v3.6.26...v3.6.27
-[3.6.28]: https://github.com/neodeskapp/neodesk/compare/v3.6.27...v3.6.28
-[3.6.29]: https://github.com/neodeskapp/neodesk/compare/v3.6.28...v3.6.29
-[3.6.30]: https://github.com/neodeskapp/neodesk/compare/v3.6.29...v3.6.30
-[3.6.31]: https://github.com/neodeskapp/neodesk/compare/v3.6.30...v3.6.31
-[3.6.32]: https://github.com/neodeskapp/neodesk/compare/v3.6.31...v3.6.32
-[3.6.33]: https://github.com/neodeskapp/neodesk/compare/v3.6.32...v3.6.33
-[3.6.34]: https://github.com/neodeskapp/neodesk/compare/v3.6.33...v3.6.34
-[3.6.35]: https://github.com/neodeskapp/neodesk/compare/v3.6.34...v3.6.35
-[3.6.36]: https://github.com/neodeskapp/neodesk/compare/v3.6.35...v3.6.36
-[3.6.37]: https://github.com/neodeskapp/neodesk/compare/v3.6.36...v3.6.37
-[3.6.38]: https://github.com/neodeskapp/neodesk/compare/v3.6.37...v3.6.38
-[3.6.39]: https://github.com/neodeskapp/neodesk/compare/v3.6.38...v3.6.39
-[3.6.40]: https://github.com/neodeskapp/neodesk/compare/v3.6.39...v3.6.40
-[3.6.41]: https://github.com/neodeskapp/neodesk/compare/v3.6.40...v3.6.41
-[3.6.42]: https://github.com/neodeskapp/neodesk/compare/v3.6.41...v3.6.42
-[3.6.43]: https://github.com/neodeskapp/neodesk/compare/v3.6.42...v3.6.43
-[3.6.44]: https://github.com/neodeskapp/neodesk/compare/v3.6.43...v3.6.44
-[3.6.45]: https://github.com/neodeskapp/neodesk/compare/v3.6.44...v3.6.45
-[3.6.46]: https://github.com/neodeskapp/neodesk/compare/v3.6.45...v3.6.46
-[3.6.47]: https://github.com/neodeskapp/neodesk/compare/v3.6.46...v3.6.47
-[3.6.48]: https://github.com/neodeskapp/neodesk/compare/v3.6.47...v3.6.48
-[3.6.49]: https://github.com/neodeskapp/neodesk/compare/v3.6.48...v3.6.49
-[3.6.50]: https://github.com/neodeskapp/neodesk/compare/v3.6.49...v3.6.50
-[3.6.51]: https://github.com/neodeskapp/neodesk/compare/v3.6.50...v3.6.51
-[3.6.52]: https://github.com/neodeskapp/neodesk/compare/v3.6.51...v3.6.52
-[3.6.53]: https://github.com/neodeskapp/neodesk/compare/v3.6.52...v3.6.53
-[3.6.54]: https://github.com/neodeskapp/neodesk/compare/v3.6.53...v3.6.54
-[3.6.55]: https://github.com/neodeskapp/neodesk/compare/v3.6.54...v3.6.55
-[3.6.56]: https://github.com/neodeskapp/neodesk/compare/v3.6.55...v3.6.56
-[3.6.57]: https://github.com/neodeskapp/neodesk/compare/v3.6.56...v3.6.57
-[3.6.58]: https://github.com/neodeskapp/neodesk/compare/v3.6.57...v3.6.58
-[3.6.59]: https://github.com/neodeskapp/neodesk/compare/v3.6.58...v3.6.59
-[3.6.60]: https://github.com/neodeskapp/neodesk/compare/v3.6.59...v3.6.60
-[3.6.61]: https://github.com/neodeskapp/neodesk/compare/v3.6.60...v3.6.61
-[3.6.62]: https://github.com/neodeskapp/neodesk/compare/v3.6.61...v3.6.62
-[3.6.63]: https://github.com/neodeskapp/neodesk/compare/v3.6.62...v3.6.63
-[3.6.64]: https://github.com/neodeskapp/neodesk/compare/v3.6.63...v3.6.64
-[3.6.65]: https://github.com/neodeskapp/neodesk/compare/v3.6.64...v3.6.65
+[3.6.0-rc.7]: https://github.com/neodeskapp/neodesk/compare/v3.6.0-rc.6...v3.6.0-rc.7
