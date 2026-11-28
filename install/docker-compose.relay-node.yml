@@ -7,6 +7,13 @@
 # by itself (one outbound TLS connection to the address in the join
 # string), which pushes the sessions it may relay.
 #
+# The server itself runs from another compose file:
+#   docker-compose.quick.single.yml          the published image, builds
+#                                            nothing: start from this one
+#   docker-compose.quick.single.macvlan.yml  the published image on a macvlan
+#                                            network, with its own LAN address
+#   docker-compose.single.yml                builds the image from a checkout
+#
 # Start it with the join string the console shows under Sites (one use,
 # valid for 24 hours):
 #   curl -fsSL https://neode.sk/install/docker-compose.relay-node.yml -o docker-compose.yml
@@ -94,7 +101,7 @@ services:
     # MODE=node: the relay's TCP and WebSocket ports take connections
     healthcheck:
       test: ["CMD", "/usr/local/bin/neodesk-healthcheck"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
       retries: 3
       start_period: 15s
