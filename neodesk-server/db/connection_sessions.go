@@ -29,7 +29,10 @@ type PeerConnectionSession struct {
 	EndedAt         *time.Time `json:"ended_at,omitempty"`
 	DurationSeconds *int64     `json:"duration_seconds,omitempty"`
 	Source          string     `json:"source"`
-	Active          bool       `json:"active"`
+	// RelayVia is how the session was relayed: "direct", "central", "lan",
+	// "node:<node id>" or "nodes:<a>,<b>"; "" when not recorded.
+	RelayVia string `json:"relay_via,omitempty"`
+	Active   bool   `json:"active"`
 }
 
 // FillDerived sets Active and DurationSeconds from StartedAt/EndedAt.

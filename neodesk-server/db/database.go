@@ -1013,4 +1013,35 @@ type Database interface {
 	GetBillingPeriodTotal(contractID, periodYM string) (*BillingPeriodTotal, error)
 	ListBillingPeriodTotalsByPackage(packageID string) ([]*BillingPeriodTotal, error)
 	ListBillingPeriodTotalsByContract(contractID string) ([]*BillingPeriodTotal, error)
+
+	// Sites and relay nodes (sites.go). Getters return nil or "" when
+	// there is no such row.
+	ListSites(orgID string, all bool) ([]Site, error)
+	GetSite(id string) (*Site, error)
+	CreateSite(s *Site) error
+	UpdateSite(s *Site) error
+	// DeleteSite removes the site with its networks, nodes, enrollment
+	// tokens, pins and the reachability rows of its nodes.
+	DeleteSite(id string) error
+	ListSiteNetworks(siteID string) ([]SiteNetwork, error)
+	ListAllSiteNetworks() ([]SiteNetwork, error)
+	ReplaceSiteNetworks(siteID string, nets []SiteNetwork) error
+	ListRelayNodes(siteID string) ([]RelayNode, error) // "" = all
+	GetRelayNode(id string) (*RelayNode, error)
+	GetRelayNodeByKey(publicKey string) (*RelayNode, error)
+	CreateRelayNode(n *RelayNode) error
+	UpdateRelayNodeState(id, version, lanAddr, publicAddr string, seen time.Time) error
+	RenameRelayNode(id, name string) error
+	RevokeRelayNode(id string, at time.Time) error
+	CreateSiteEnrollmentToken(t *SiteEnrollmentToken) error
+	// ConsumeSiteEnrollmentToken uses the token once, atomically;
+	// ErrSiteTokenInvalid when it is used, expired at now or missing.
+	ConsumeSiteEnrollmentToken(hash, nodeID string, now time.Time) (*SiteEnrollmentToken, error)
+	ListSiteEnrollmentTokens(siteID string) ([]SiteEnrollmentToken, error)
+	SetSitePin(kind, ref, siteID string) error // siteID "" removes
+	GetSitePin(kind, ref string) (string, error)
+	ListSitePins() ([]SitePin, error)
+	UpsertSiteReachability(r *SiteReachability) error
+	ListSiteReachability() ([]SiteReachability, error)
+	SetConnectionSessionRelayVia(relayUUID, via string) error
 }

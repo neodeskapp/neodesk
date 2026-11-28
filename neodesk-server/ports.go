@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/neodeskapp/neodesk/neodesk-server/relaynode/hub"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/config"
 	consoleconfig "github.com/neodeskapp/neodesk/neodesk-server/console/config"
@@ -29,6 +30,9 @@ func startListeners(cfg *config.Config, ccfg *consoleconfig.Config, getenv func(
 		{cfg.RelayPort, "RELAY_PORT (-relay-port, the relay)"},
 		{cfg.WSRelayPort(), "RELAY_PORT+2 (the relay's WebSocket)"},
 		{cfg.APIPort, api},
+	}
+	if port, err := hub.ControlPort(getenv); err == nil && port != 0 {
+		out = append(out, listener{port, "NODE_CONTROL_PORT (relay nodes' control connections)"})
 	}
 	if cfg.CDAPEnabled {
 		out = append(out, listener{cfg.CDAPPort, "CDAP_PORT (-cdap-port, the CDAP gateway)"})

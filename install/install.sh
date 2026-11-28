@@ -56,6 +56,11 @@ DO_RESCUE=false
 RESCUE_ACTION="rescue"
 CHECK_CAPABILITIES=false
 MANAGED_CONFIG_CHANGES=()
+# --node: a relay node of a site (neodesk.sh --node), with the console's
+# join string and the addresses devices dial it at
+NODE_JOIN=""
+NODE_LAN_ADDR=""
+NODE_PUBLIC_ADDR=""
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -179,8 +184,22 @@ development build while the repository has none:
   curl -fsSL https://neode.sk/install.sh | sudo bash -s -- --native
 Native, the development build: add --channel dev
 
+A relay node of a site (the join string is in the console, under Sites):
+  curl -fsSL https://neode.sk/install.sh | sudo bash -s -- --node --join nd1.xxxx
+
 Options (pass them after "bash -s --"):
   --docker | --native            Installation mode (default: docker)
+  --node                         A relay node of a site instead of a server:
+                                 the service neodesk-relay-node, no database,
+                                 no console; a server here stays as it is.
+                                 Run again to update it; with --uninstall it
+                                 is removed (--purge also its key)
+  --join STRING                  Relay node: the console's join string (the
+                                 first install only)
+  --lan-addr HOST:PORT           Relay node: where LAN devices dial it
+                                 (default: the LAN address, port 21117)
+  --public-addr HOST:PORT        Relay node: where devices outside the LAN
+                                 dial it, through a port forward (default: none)
   --migrate-split                Replace a split install (server and console
                                  containers) with the one container, which takes
                                  its data over
@@ -245,6 +264,15 @@ while [ $# -gt 0 ]; do
         --migrate-split) MIGRATE_SPLIT=true; shift ;;
         --split) die "--split is gone: NeoDesk runs as one container. An existing split install moves with --migrate-split" ;;
         --native) INSTALL_MODE="native"; shift ;;
+        --node) INSTALL_MODE="node"; shift ;;
+        --join|--lan-addr|--public-addr)
+            [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"
+            case "$1" in
+                --join) NODE_JOIN="$2" ;;
+                --lan-addr) NODE_LAN_ADDR="$2" ;;
+                --public-addr) NODE_PUBLIC_ADDR="$2" ;;
+            esac
+            shift 2 ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         --version) NEODESK_VERSION="$2"; NEODESK_VERSION_GIVEN="$2"; shift 2 ;;
         --branch) NEODESK_BRANCH="$2"; NEODESK_RAW_BASE="https://raw.githubusercontent.com/${NEODESK_REPO}/${NEODESK_BRANCH}/install"; shift 2 ;;
@@ -825,6 +853,36 @@ rescue_native_mode() {
     die "Native checkout not found at ${repo_dir}. Re-run without --rescue to install, or use --docker for Docker rescue."
 }
 
+# ── Relay node ────────────────────────────────────────────────────────────────
+
+# node_mode ACTION: neodesk.sh of the release (fetch_manager) installs,
+# updates (ACTION install) or removes (uninstall) the relay node. It runs
+# once and stays nowhere: a server install here keeps its neodesk-setup.
+node_mode() {
+    local work rc=0
+    local args=(--node)
+    if [ "$1" = uninstall ]; then
+        args+=(--uninstall)
+        [ "$DO_PURGE" != true ] || args+=(--purge)
+    else
+        [ -z "$NODE_JOIN" ] || args+=(--join "$NODE_JOIN")
+        [ -z "$NODE_LAN_ADDR" ] || args+=(--lan-addr "$NODE_LAN_ADDR")
+        [ -z "$NODE_PUBLIC_ADDR" ] || args+=(--public-addr "$NODE_PUBLIC_ADDR")
+        [ "$SKIP_VERIFY" != true ] || args+=(--skip-verify)
+        case "$RELEASE_CHANNEL" in
+            stable|main) args+=(--channel stable) ;;
+            dev|development) args+=(--channel dev) ;;
+        esac
+    fi
+    work=$(mktemp -d)
+    fetch_manager neodesk.sh "$work/neodesk.sh"
+    grep -q '^NEODESK_SH_REVISION=' "$work/neodesk.sh" || { rm -rf "$work"; die "The downloaded neodesk.sh is not NeoDesk's installer"; }
+    [ -z "${RELEASE_BASE_URL:-}" ] || export RELEASE_BASE_URL
+    bash "$work/neodesk.sh" "${args[@]}" || rc=$?
+    rm -rf "$work"
+    [ "$rc" = 0 ] || die "neodesk.sh --node failed (exit $rc); its output is above"
+}
+
 run_native_management_action() {
     local native_installer
     native_installer=$(native_manager)
@@ -861,12 +919,21 @@ main() {
         case "$INSTALL_MODE" in
             docker) uninstall_docker_mode ;;
             native) uninstall_native_mode ;;
+            node) require_root; node_mode uninstall ;;
             *) die "Unknown install mode: $INSTALL_MODE" ;;
         esac
         exit 0
     fi
 
     require_root
+
+    if [ "$INSTALL_MODE" = node ]; then
+        if [ "$CHECK_CAPABILITIES" = true ] || [ "${#MANAGED_CONFIG_CHANGES[@]}" -gt 0 ] || [ "$DO_RESCUE" = true ]; then
+            die "--node takes --join, --lan-addr, --public-addr, --uninstall and --purge only"
+        fi
+        node_mode install
+        exit 0
+    fi
 
     if [ "$CHECK_CAPABILITIES" = true ] || [ "${#MANAGED_CONFIG_CHANGES[@]}" -gt 0 ]; then
         case "$INSTALL_MODE" in

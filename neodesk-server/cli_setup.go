@@ -36,6 +36,7 @@ var setupFlags = []string{
 	"--nodejs", "--flask", "--update", "--reset-password", "--reset-two-factor",
 	"--binary", "--from-source", "--channel", "--postgresql", "--postgres",
 	"--relay-mode", "--relay-servers", "--relay", "--protocol", "--pg-uri",
+	"--node", "--join", "--lan-addr", "--public-addr",
 }
 
 // setupCall is what the hand-over needs from the process. Tests replace it.

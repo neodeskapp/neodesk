@@ -186,6 +186,12 @@ RESET_TWO_FACTOR=false
 # checkout (--from-source), else the release of the update channel.
 SERVER_BINARY_FILE="${SERVER_BINARY_FILE:-}"
 FROM_SOURCE=false
+# --node: this machine becomes a relay node of a site (do_node_install),
+# with the console's join string and the addresses devices dial it at
+NODE_MODE=false
+NODE_JOIN="${NODE_JOIN:-}"
+NODE_LAN_ADDR="${NODE_LAN_ADDR:-}"
+NODE_PUBLIC_ADDR="${NODE_PUBLIC_ADDR:-}"
 # The release key (DECISIONS A152): the public half of the ed25519 key
 # that signs each release's manifest. A binary with verify-release carries
 # the same key; without one, openssl checks a download with this copy.
@@ -269,6 +275,22 @@ while [[ $# -gt 0 ]]; do
             FROM_SOURCE=true
             shift
             ;;
+        --node)
+            NODE_MODE=true
+            shift
+            ;;
+        --join|--lan-addr|--public-addr)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then
+                echo "ERROR: $1 needs a value"
+                exit 1
+            fi
+            case $1 in
+                --join) NODE_JOIN="$2" ;;
+                --lan-addr) NODE_LAN_ADDR="$2" ;;
+                --public-addr) NODE_PUBLIC_ADDR="$2" ;;
+            esac
+            shift 2
+            ;;
         --channel)
             case "${2:-}" in
                 stable|main) UPDATE_GITHUB_BRANCH=main ;;
@@ -339,6 +361,15 @@ while [[ $# -gt 0 ]]; do
             echo "  --pg-uri URI     PostgreSQL connection URI (implies --postgresql)"
             echo "  --relay-mode M   Relay IP selection: 'auto' (public, default), 'local' (LAN), 'public'"
             echo "  --relay-servers IP  Force a fixed relay server address (IP or host[:port])"
+            echo "  --node           Make this machine a relay node of a site (neodesk-relay-node.service):"
+            echo "                   the server binary in node mode, without database or console. A server"
+            echo "                   install here stays as it is. Run again to update the node; with"
+            echo "                   --uninstall it removes the node (--purge also its key)"
+            echo "  --join STRING    The join string the console shows under Sites (first install only)"
+            echo "  --lan-addr H:P   Where devices in the LAN dial the relay (default: this machine's"
+            echo "                   LAN address, port 21117)"
+            echo "  --public-addr H:P  Where devices outside the LAN dial it, through a port forward"
+            echo "                   (default: none, only LAN devices use the node)"
             echo "  --help, -h       Show this help message"
             echo ""
             echo "Environment variables:"
@@ -8187,6 +8218,233 @@ do_migrate_database() {
 }
 
 #===============================================================================
+# Relay node (--node)
+#===============================================================================
+# A relay node is the server binary in node mode at a site: the site's
+# devices relay through it. It has no database and no web console. The
+# central server sends it the sessions it may relay over one outbound TLS
+# connection, to the address in the join string. A server install on the
+# same machine stays as it is: the node has its own folder, account, env
+# file and unit.
+
+NODE_SERVICE="neodesk-relay-node"
+NODE_UNIT="/etc/systemd/system/${NODE_SERVICE}.service"
+NODE_USER="neodesk-relay-node"
+# The binary, root's own: a run of the installer updates it
+NODE_INSTALL_DIR="/opt/neodesk-relay-node"
+# node.key and node.json, the node's identity and enrollment: the unit's
+# StateDirectory, 0700 and the node account's own
+NODE_STATE_DIR="/var/lib/${NODE_SERVICE}"
+# The join string and the addresses, root's own (0600)
+NODE_ENV_DIR="/etc/${NODE_SERVICE}"
+NODE_ENV_FILE="$NODE_ENV_DIR/node.env"
+
+# node_address ADDRESS: ADDRESS as host:port, with the relay port 21117
+# when it names none. Fails for anything but a host name, an IPv4 address
+# or an IPv6 address in brackets.
+node_address() {
+    local addr="$1"
+    if [[ "$addr" =~ ^\[[0-9A-Fa-f:.]+\]$ ]] || [[ "$addr" =~ ^[A-Za-z0-9.-]+$ ]]; then
+        addr="$addr:21117"
+    fi
+    [[ "$addr" =~ ^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):[0-9]{1,5}$ ]] || return 1
+    printf '%s\n' "$addr"
+}
+
+# The account the node runs as, a system account like the server's
+ensure_node_user() {
+    id "$NODE_USER" &>/dev/null && return 0
+    useradd -r -s /usr/sbin/nologin -d "$NODE_STATE_DIR" -M -c "NeoDesk relay node" "$NODE_USER" || {
+        print_error "Could not create the system user $NODE_USER"
+        return 1
+    }
+}
+
+# write_node_unit: neodesk-relay-node.service. The node needs no rights
+# beyond its state folder and the network, so the unit closes the rest.
+# Exit status 3 is a request to be started again, as for the server.
+write_node_unit() {
+    cat > "$NODE_UNIT" << EOF
+[Unit]
+Description=NeoDesk relay node
+Documentation=https://github.com/neodeskapp/neodesk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$NODE_USER
+Group=$NODE_USER
+EnvironmentFile=$NODE_ENV_FILE
+Environment=NEODESK_SUPERVISOR=systemd
+StateDirectory=$NODE_SERVICE
+StateDirectoryMode=0700
+WorkingDirectory=$NODE_STATE_DIR
+ExecStart=$NODE_INSTALL_DIR/neodesk-server node
+Restart=always
+RestartSec=2
+SuccessExitStatus=3
+LimitNOFILE=1000000
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 0644 "$NODE_UNIT"
+}
+
+# do_node_install: installs or updates the relay node. The first install
+# needs --join; the addresses default to what the env file has, else the
+# LAN address with port 21117 and no public address.
+do_node_install() {
+    print_header
+    print_step "Installing the NeoDesk relay node..."
+    if ! command -v systemctl &>/dev/null; then
+        print_error "The relay node runs as a systemd service; without systemd use Docker (docker-compose.relay-node.yml)"
+        return 1
+    fi
+    local enrolled=false
+    [ -s "$NODE_STATE_DIR/node.json" ] && enrolled=true
+    if [ -n "$NODE_JOIN" ]; then
+        if [[ ! "$NODE_JOIN" =~ ^nd1\.[A-Za-z0-9_=-]+$ ]]; then
+            print_error "--join takes the join string the console shows under Sites (nd1. and the rest of it)"
+            return 1
+        fi
+        if [ "$enrolled" = true ]; then
+            print_error "This machine is a relay node already ($NODE_STATE_DIR/node.json)"
+            print_info "Run without --join to update it. To join another site, first: --node --uninstall --purge"
+            return 1
+        fi
+    elif [ "$enrolled" != true ] && [ -z "$(env_file_value "$NODE_ENV_FILE" NODE_JOIN)" ]; then
+        print_error "--join is needed: the join string the console shows under Sites"
+        return 1
+    fi
+
+    local lan public
+    lan="${NODE_LAN_ADDR:-$(env_file_value "$NODE_ENV_FILE" NODE_LAN_ADDR)}"
+    public="${NODE_PUBLIC_ADDR:-$(env_file_value "$NODE_ENV_FILE" NODE_PUBLIC_ADDR)}"
+    [ -n "$lan" ] || lan=$(get_local_ip)
+    if ! lan=$(node_address "$lan"); then
+        print_error "--lan-addr takes host:port (an IPv6 address in brackets: [2001:db8::5]:21117)"
+        return 1
+    fi
+    if [ -n "$public" ] && ! public=$(node_address "$public"); then
+        print_error "--public-addr takes host:port (an IPv6 address in brackets: [2001:db8::5]:21117)"
+        return 1
+    fi
+    case "$lan" in
+        127.*) print_warning "No LAN address found: the node says $lan; give the right one with --lan-addr" ;;
+    esac
+
+    ensure_node_user || return 1
+    # The binary is checked against the node's own folder (its installed
+    # binary verifies the release), never against a server install here
+    RUSTDESK_PATH="$NODE_INSTALL_DIR"
+    CONSOLE_PATH=""
+    obtain_server_binary || { rm -rf "${STAGED_SERVER_DIR:-}"; return 1; }
+    if ! grep -a -q -F 'NODE_JOIN' "$STAGED_SERVER_BINARY"; then
+        print_error "This neodesk-server has no relay node mode yet ($STAGED_SERVER_VERSION)"
+        rm -rf "$STAGED_SERVER_DIR"
+        return 1
+    fi
+    systemctl stop "$NODE_SERVICE" 2>/dev/null || true
+    install -d -m 0755 -o root -g root "$NODE_INSTALL_DIR"
+    install_staged_binary || { rm -rf "$STAGED_SERVER_DIR"; return 1; }
+    rm -rf "$STAGED_SERVER_DIR"
+
+    install -d -m 0700 -o root -g root "$NODE_ENV_DIR"
+    if [ ! -f "$NODE_ENV_FILE" ]; then
+        (umask 077 && printf '# NeoDesk relay node: read by %s.service\n' "$NODE_SERVICE" > "$NODE_ENV_FILE")
+    fi
+    chown root:root "$NODE_ENV_FILE"
+    chmod 0600 "$NODE_ENV_FILE"
+    _upsert_env_line "$NODE_ENV_FILE" MODE node
+    _upsert_env_line "$NODE_ENV_FILE" NODE_DATA_DIR "$NODE_STATE_DIR"
+    _upsert_env_line "$NODE_ENV_FILE" NODE_LAN_ADDR "$lan"
+    _upsert_env_line "$NODE_ENV_FILE" NODE_PUBLIC_ADDR "$public"
+    [ -z "$NODE_JOIN" ] || _upsert_env_line "$NODE_ENV_FILE" NODE_JOIN "$NODE_JOIN"
+    print_success "Settings in $NODE_ENV_FILE (LAN $lan, public ${public:-none})"
+
+    write_node_unit
+    systemctl daemon-reload
+    systemctl enable "$NODE_SERVICE" >/dev/null 2>&1 || true
+    if ! systemctl restart "$NODE_SERVICE"; then
+        print_error "$NODE_SERVICE did not start"
+        journalctl -u "$NODE_SERVICE" -n 30 --no-pager 2>/dev/null || true
+        return 1
+    fi
+    print_success "Started $NODE_SERVICE.service (user $NODE_USER)"
+
+    # The join string is good for one enrollment: once the node has its
+    # node.json it goes from the env file
+    if [ -n "$(env_file_value "$NODE_ENV_FILE" NODE_JOIN)" ]; then
+        local i
+        for i in $(seq 1 30); do
+            [ -s "$NODE_STATE_DIR/node.json" ] && break
+            systemctl is-active --quiet "$NODE_SERVICE" || break
+            sleep 1
+        done
+        if [ -s "$NODE_STATE_DIR/node.json" ]; then
+            _remove_env_line "$NODE_ENV_FILE" NODE_JOIN
+            print_success "The node joined its site"
+        elif ! systemctl is-active --quiet "$NODE_SERVICE"; then
+            print_error "$NODE_SERVICE stopped before it joined its site"
+            journalctl -u "$NODE_SERVICE" -n 30 --no-pager 2>/dev/null || true
+            return 1
+        else
+            print_warning "The node has not joined its site yet; see: journalctl -u $NODE_SERVICE -f"
+        fi
+    fi
+    print_info "Devices reach the relay on TCP 21117 and 21119 (WebSocket): open both towards them,"
+    print_info "and forward them from the public address when there is one"
+    print_info "Update: run this again without --join. Remove: --node --uninstall (--purge also its key)"
+    return 0
+}
+
+# do_node_uninstall: removes the relay node; its key and enrollment stay
+# unless --purge is given
+do_node_uninstall() {
+    print_header
+    print_step "Removing the NeoDesk relay node..."
+    if [ ! -f "$NODE_UNIT" ] && [ ! -d "$NODE_INSTALL_DIR" ] && [ ! -d "$NODE_STATE_DIR" ]; then
+        print_info "There is no relay node on this machine"
+        return 0
+    fi
+    systemctl disable --now "$NODE_SERVICE" 2>/dev/null || true
+    rm -f "$NODE_UNIT"
+    systemctl daemon-reload 2>/dev/null || true
+    rm -rf -- "${NODE_INSTALL_DIR:?}" "${NODE_ENV_DIR:?}"
+    if [ "$PURGE_MODE" = true ]; then
+        rm -rf -- "${NODE_STATE_DIR:?}"
+        userdel "$NODE_USER" 2>/dev/null || true
+        print_success "Relay node removed with its key; remove it in the console too (Sites)"
+    else
+        print_success "Relay node removed; its key stays in $NODE_STATE_DIR (--purge removes it)"
+    fi
+    return 0
+}
+
+#===============================================================================
 # Main Menu
 #===============================================================================
 
@@ -8233,6 +8491,15 @@ main() {
             esac
         fi
         exit 1
+    fi
+    # A relay node leaves a server install here alone: nothing below runs
+    if [ "$NODE_MODE" = true ]; then
+        if [ "$UNINSTALL_MODE" = true ]; then
+            do_node_uninstall
+        else
+            do_node_install
+        fi
+        exit $?
     fi
     move_backup_folder || print_warning "The backups in $OLD_BACKUP_DIR could not move to $BACKUP_DIR"
     # Backups an older installer left readable for every account

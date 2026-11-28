@@ -88,7 +88,7 @@ HEALTH_TIMEOUT="${NEODESK_HEALTH_TIMEOUT:-180}"
 KEEP_BACKUPS=5
 # 21114: the API for RustDesk clients without an API server setting,
 # which derive it from the ID server's port (21116 - 2)
-DOCKER_PORTS_TCP=(21114 21115 21116 21117 21118 21119 21121 21122)
+DOCKER_PORTS_TCP=(21114 21115 21116 21117 21118 21119 21121 21122 21123)
 DOCKER_PORTS_UDP=(21116)
 
 # Colours: 24-bit where the terminal says it has them (COLORTERM), else the

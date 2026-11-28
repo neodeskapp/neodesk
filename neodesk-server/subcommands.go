@@ -2,17 +2,22 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/cli"
+	"github.com/neodeskapp/neodesk/neodesk-server/config"
 	consoleconfig "github.com/neodeskapp/neodesk/neodesk-server/console/config"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/updater"
 	"github.com/neodeskapp/neodesk/neodesk-server/migrate"
+	"github.com/neodeskapp/neodesk/neodesk-server/relaynode/agent"
 )
 
 // subcommand is a command of neodesk-server besides running the
@@ -65,6 +70,10 @@ var subcommands = map[string]subcommand{
 	"backup": {
 		usage: backupUsage,
 		run:   runBackup,
+	},
+	"node": {
+		usage: nodeUsage,
+		run:   runNodeCommand,
 	},
 	"migrate": {
 		usage: "migrate -mode sqlite2pg|pg2sqlite|rust2go|backup -src X [-dst Y] [-overwrite]   move or back up the database",
@@ -154,3 +163,73 @@ func runRollback(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 const envMergeUsage = "env merge --target FILE [--fresh] [--subst-file JSON] [--subst-env]   write the env file from the template"
+
+const nodeUsage = "node [--join STRING] [--data-dir DIR] [--lan-addr HOST:PORT] [--public-addr HOST:PORT]   run as a relay node of a site (MODE=node)"
+
+// nodeFlags are the node command's flags; set ones win over NODE_*.
+type nodeFlags struct {
+	join, dataDir, lanAddr, publicAddr string
+}
+
+// runNodeCommand is "neodesk-server node": MODE=node with the flags.
+func runNodeCommand(args []string, _ io.Reader, _, stderr io.Writer) int {
+	fs := flag.NewFlagSet("node", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var f nodeFlags
+	fs.StringVar(&f.join, "join", "", "enrollment string from the console (first start)")
+	fs.StringVar(&f.dataDir, "data-dir", "", "directory for the node key and state (NODE_DATA_DIR)")
+	fs.StringVar(&f.lanAddr, "lan-addr", "", "relay host:port clients on the LAN dial (NODE_LAN_ADDR)")
+	fs.StringVar(&f.publicAddr, "public-addr", "", "relay host:port clients outside dial (NODE_PUBLIC_ADDR)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintln(stderr, "neodesk-server: usage: neodesk-server "+nodeUsage)
+		return 2
+	}
+	cfg := config.DefaultConfig()
+	cfg.LoadEnv()
+	cfg.Mode = "node"
+	return runRelayNode(cfg, os.Getenv, f, nil, nil)
+}
+
+// runRelayNode runs MODE=node until SIGINT, SIGTERM or a closed stop. It
+// opens no database and starts neither signal nor console.
+func runRelayNode(cfg *config.Config, getenv func(string) string, f nodeFlags, stop <-chan struct{}, ready func()) int {
+	acfg := agent.ConfigFromEnv(getenv, cfg)
+	for _, o := range []struct {
+		flag string
+		to   *string
+	}{
+		{f.join, &acfg.Join}, {f.dataDir, &acfg.DataDir}, {f.lanAddr, &acfg.LanAddr}, {f.publicAddr, &acfg.PublicAddr},
+	} {
+		if o.flag != "" {
+			*o.to = o.flag
+		}
+	}
+	acfg.Version = Version
+	acfg.Ready = ready
+	a, err := agent.New(acfg)
+	if err != nil {
+		log.Printf("Relay node: %v", err)
+		return 1
+	}
+	log.Printf("NeoDesk relay node %s: relay :%d (TCP), :%d (WebSocket), data in %s", Version, cfg.RelayPort, cfg.WSRelayPort(), acfg.DataDir)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if stop != nil {
+		go func() {
+			select {
+			case <-stop:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
+	if err := a.Run(ctx); err != nil {
+		log.Printf("Relay node: %v", err)
+		return 1
+	}
+	log.Printf("Relay node stopped")
+	return 0
+}

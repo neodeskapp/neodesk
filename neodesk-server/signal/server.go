@@ -181,6 +181,9 @@ type Server struct {
 	// tickets is the relay ticket store sessions are admitted on (see
 	// SetTickets); nil means relay.DefaultTickets.
 	tickets relay.Tickets
+	// siteRouter finds relay node routes (SetSiteRouter); nil for none
+	siteRouter SiteRouter
+	siteMu     sync.RWMutex
 
 	// wsConns and natConns count the open connections of the WebSocket
 	// signal port and the NAT test port.

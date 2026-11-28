@@ -18,6 +18,7 @@
 #   21117 - Relay TCP
 #   21118 - WebSocket Signal
 #   21119 - WebSocket Relay
+#   21123 - Relay node control (NODE_CONTROL_PORT, 0 turns it off)
 
 # ============= Web app build (only the build machine needs Node.js) =============
 FROM node:22.23.2-alpine3.24 AS web-ui-builder
@@ -134,7 +135,7 @@ ENV NODE_ENV=production \
     NEODESK_UPDATE_MODE=image \
     NEODESK_SUPERVISOR=docker
 
-EXPOSE 3375 5443 21114 21115 21116/tcp 21116/udp 21117 21118 21119 21121 21122
+EXPOSE 3375 5443 21114 21115 21116/tcp 21116/udp 21117 21118 21119 21121 21122 21123
 
 # The server writes files of its own (mesh_agent_server.pem) in its folder
 WORKDIR /opt/neodesk/data

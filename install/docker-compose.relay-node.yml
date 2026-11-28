@@ -1,0 +1,104 @@
+# =============================================================================
+# NeoDesk relay node with Docker
+# =============================================================================
+# A relay node is the NeoDesk server binary in node mode at a site: devices
+# of the site relay through it instead of through the central server. It
+# has no database and no web console. It connects to the central server
+# by itself (one outbound TLS connection to the address in the join
+# string), which pushes the sessions it may relay.
+#
+# Start it with the join string the console shows under Sites (one use,
+# valid for 24 hours):
+#   curl -fsSL https://neode.sk/install/docker-compose.relay-node.yml -o docker-compose.yml
+#   NODE_JOIN=nd1.... NODE_LAN_ADDR=192.168.1.20:21117 NODE_PUBLIC_ADDR=203.0.113.20:21117 docker compose up -d
+#
+# Or put the settings into .env next to this file, one KEY=value per line:
+#   NODE_JOIN=nd1....                  the join string, at the first start
+#                                      only; the node keeps its key and its
+#                                      enrollment in the volume
+#   NODE_LAN_ADDR=192.168.1.20:21117   host:port devices of the site's LAN
+#                                      dial the relay at
+#   NODE_PUBLIC_ADDR=203.0.113.20:21117  host:port devices outside the LAN
+#                                      dial it at (a port forward to this
+#                                      host); empty: only LAN devices use
+#                                      the node
+#   NEODESK_IMAGE_TAG=3.6.56           pin a release (default: latest)
+#
+# Ports the node listens on: 21117 (relay, TCP) and 21119 (relay over
+# WebSocket). Both must reach this host from the devices, the public one
+# through a port forward. The node needs no inbound port from the central
+# server.
+#
+# On Linux, network_mode: host (in place of the ports below) lets the node
+# see the devices' own addresses; Docker's published ports work too.
+#
+# Logs:   docker compose logs -f relay-node
+# Update: docker compose pull && docker compose up -d
+# Leave the site: docker compose down -v (deletes the node's key; the
+# console then shows the node as offline until it is removed there)
+# =============================================================================
+
+services:
+  relay-node:
+    # The server-only image (the console is off in it): the same binary,
+    # amd64 and arm64
+    image: ghcr.io/neodeskapp/neodesk-server:${NEODESK_IMAGE_TAG:-latest}
+    container_name: neodesk-relay-node
+    hostname: neodesk-relay-node
+    command: ["/usr/local/bin/neodesk-server", "node"]
+    ports:
+      - "21117:21117"           # Relay TCP
+      - "21119:21119"           # Relay over WebSocket (RELAY_PORT + 2)
+      # Later, when the node also takes signalling for the site's devices:
+      # - "21114:21114"         # API
+      # - "21115:21115"         # NAT type test
+      # - "21116:21116/tcp"     # Signal TCP
+      # - "21116:21116/udp"     # Signal UDP
+    volumes:
+      - relay-node-data:/opt/neodesk/data
+    # Every KEY=value of .env next to this file reaches the node; the
+    # entries under environment below win over it.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - MODE=node
+      # The join string of the console, read at the first start only
+      - NODE_JOIN=${NODE_JOIN:-}
+      # node.key (the node's identity) and node.json (its enrollment),
+      # 0600, in the volume
+      - NODE_DATA_DIR=/opt/neodesk/data
+      # host:port of the relay as devices dial it, in the LAN and from
+      # outside; reported to the central server at every start
+      - NODE_LAN_ADDR=${NODE_LAN_ADDR:-}
+      - NODE_PUBLIC_ADDR=${NODE_PUBLIC_ADDR:-}
+      - NEODESK_SUPERVISOR=docker
+      # Optional: map neodesk to a bind mount's owner. Default 10001.
+      - PUID=${PUID:-10001}
+      - PGID=${PGID:-10001}
+      - TZ=${TZ:-UTC}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # SETUID and SETGID: the entrypoint starts the node as neodesk; CHOWN
+    # and FOWNER: it gives the volume to neodesk; KILL: tini passes docker
+    # stop's SIGTERM on to the node
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - FOWNER
+      - KILL
+    # MODE=node: the relay's TCP and WebSocket ports take connections
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/neodesk-healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  relay-node-data:
+    name: neodesk-relay-node-data
