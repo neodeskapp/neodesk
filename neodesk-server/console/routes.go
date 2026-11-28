@@ -58,6 +58,7 @@ import (
 	"github.com/neodeskapp/neodesk/neodesk-server/console/routes/settingsbackup"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/routes/settingsupdates"
 	setupguideroutes "github.com/neodeskapp/neodesk/neodesk-server/console/routes/setupguide"
+	sitesroutes "github.com/neodeskapp/neodesk/neodesk-server/console/routes/sites"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/routes/system"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/routes/tenants"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/routes/tickets"
@@ -179,4 +180,5 @@ func registerRoutes(d *kit.Deps, backups *backup.Service) {
 	accessibilityroutes.Register(d)           // the signed-in account's own accessibility settings
 	dashboardroutes.Register(d)               // the overview's boards: each account's own and the shared ones
 	devicelogin.Register(d)                   // the desktop app's sign-in through the console (Allow page)
+	sitesroutes.Register(d)                   // sites and relay nodes; after the device group, whose scope check guards /api/devices/{id}/site
 }

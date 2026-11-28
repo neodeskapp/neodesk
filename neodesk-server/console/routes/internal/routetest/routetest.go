@@ -55,6 +55,9 @@ type Options struct {
 	Env map[string]string
 	// Config changes the configuration before the console is built.
 	Config func(cfg *config.Config)
+	// Data is the server's database (console.Options.Data); nil gives the
+	// console none.
+	Data db.Database
 }
 
 // World is a console on a fresh database.
@@ -122,7 +125,7 @@ func New(t *testing.T, o Options) *World {
 	if api == nil {
 		api = http.NotFoundHandler()
 	}
-	s, err := console.New(ctx, console.Options{Config: cfg, Store: db, API: api, Roles: o.Roles})
+	s, err := console.New(ctx, console.Options{Config: cfg, Store: db, API: api, Roles: o.Roles, Data: o.Data})
 	if err != nil {
 		t.Fatalf("console.New: %v", err)
 	}

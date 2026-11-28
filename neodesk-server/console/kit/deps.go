@@ -29,6 +29,7 @@ import (
 	"github.com/neodeskapp/neodesk/neodesk-server/console/servermgmt"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/session"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/setupguide"
+	"github.com/neodeskapp/neodesk/neodesk-server/console/sitedata"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/statuspush"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/store"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/updater"
@@ -167,6 +168,9 @@ type Deps struct {
 	// SetupGuide is the first-install guide on the overview: who sees it
 	// and which of its steps the server sees done.
 	SetupGuide *setupguide.Service
+	// Sites is the server's sites and relay nodes (package sitedata); nil
+	// for a console without the server's database.
+	Sites *sitedata.Service
 }
 
 // At returns the same Deps with both route tables mounted at prefix, for

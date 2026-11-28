@@ -1,11 +1,13 @@
 <!--
   New or edit a folder: name, colour, and who may see it (usernames and
-  user groups; empty means everyone with device permissions). A short form,
-  so a centred dialog.
+  user groups; empty means everyone with device permissions), and on a
+  server with sites the site its devices are pinned to. A short form, so a
+  centred dialog.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { createFolder, updateFolder, type Folder } from '#lib/api/devices.ts';
+	import { listSites, setFolderSite, type Site } from '#lib/api/sites.ts';
 	import { listUserGroups, type UserGroup } from '#lib/api/users.ts';
 	import { t } from '#lib/i18n/i18n.svelte.ts';
 	import { link } from '#lib/nav.ts';
@@ -16,6 +18,7 @@
 	import Field from '#lib/ui/Field.svelte';
 	import FormStatus from '#lib/ui/FormStatus.svelte';
 	import Input from '#lib/ui/Input.svelte';
+	import Select from '#lib/ui/Select.svelte';
 	import { createForm } from '#lib/ui/form.svelte.ts';
 	import { toast } from '#lib/ui/toasts.svelte.ts';
 
@@ -45,6 +48,19 @@
 		);
 	});
 
+	/* Sites, on a server that has any: the folder's devices can be pinned to one */
+	let sites = $state.raw<Site[]>([]);
+	$effect(() => {
+		listSites().then(
+			(l) => (sites = l.sites),
+			() => (sites = [])
+		);
+	});
+	const siteOptions = $derived([
+		{ value: '', label: t('sites.pin_none') },
+		...sites.map((s) => ({ value: s.id, label: s.org_name ? `${s.name} (${s.org_name})` : s.name }))
+	]);
+
 	const form = createForm({
 		initial: untrack(() => ({
 			name: folder?.name ?? '',
@@ -53,7 +69,8 @@
 					? folder.color
 					: (folder?.color ?? COLORS[0] ?? '#6366f1'),
 			allowedUsers: (folder?.allowed_users ?? []).join(', '),
-			allowedGroups: [...(folder?.allowed_groups ?? [])]
+			allowedGroups: [...(folder?.allowed_groups ?? [])],
+			site: folder?.site_id ?? ''
 		})),
 		validate: (v) => ({ name: v.name.trim() ? undefined : t('folders.name_required') }),
 		submit: async (v) => {
@@ -63,8 +80,11 @@
 				allowed_users: v.allowedUsers,
 				allowed_groups: v.allowedGroups
 			};
+			let id = folder?.id;
 			if (folder) await updateFolder(folder.id, body);
-			else await createFolder(body);
+			else id = (await createFolder(body)).id;
+			if (id !== undefined && sites.length && v.site !== (folder?.site_id ?? ''))
+				await setFolderSite(id, v.site);
 			toast.success(folder ? t('folders.updated') : t('folders.created'));
 			onsaved();
 		}
@@ -95,6 +115,13 @@
 				{/each}
 			</div>
 		</div>
+		{#if sites.length}
+			<Field label={t('sites.site')} hint={t('sites.folder_pin_hint')} width="medium">
+				{#snippet children(f)}
+					<Select {...f} options={siteOptions} bind:value={form.values.site} />
+				{/snippet}
+			</Field>
+		{/if}
 		{#if editsAccess}
 			<Field label={t('devices.group_allowed_users')} hint={t('devices.group_allowed_users_hint')}>
 				{#snippet children(f)}

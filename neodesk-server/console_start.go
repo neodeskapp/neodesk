@@ -81,6 +81,7 @@ func startConsole(ctx context.Context, cfg *config.Config, database db.Database,
 		PublicRelay: cfg.SetPublicRelayServer,
 		Leases:      rt.consoleLeases(),
 		Clustered:   rt != nil && rt.cfg.Enabled(),
+		Data:        database,
 	})
 	if err != nil {
 		_ = sdb.Close()
