@@ -502,6 +502,10 @@
       },
       {
        "count": 0,
+       "name": "relay_nodes"
+      },
+      {
+       "count": 0,
        "name": "relay_sessions"
       },
       {
@@ -535,6 +539,26 @@
       {
        "count": 0,
        "name": "settings"
+      },
+      {
+       "count": 0,
+       "name": "site_enrollment_tokens"
+      },
+      {
+       "count": 0,
+       "name": "site_networks"
+      },
+      {
+       "count": 0,
+       "name": "site_pins"
+      },
+      {
+       "count": 0,
+       "name": "site_reachability"
+      },
+      {
+       "count": 0,
+       "name": "sites"
       },
       {
        "count": 0,
