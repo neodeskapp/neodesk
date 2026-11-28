@@ -2425,7 +2425,19 @@
     "action_fleet_workflow_run": "Workflow run",
     "action_quick_support_receiver_offer": "Offer to install after quick support changed",
     "action_receiver_installer_downloaded": "Receiver app installer downloaded",
-    "action_dashboards_shared_changed": "Gedeelde dashboards gepubliceerd"
+    "action_dashboards_shared_changed": "Gedeelde dashboards gepubliceerd",
+    "action_relay_node_token_created": "Relay node enrollment string created",
+    "action_relay_node_revoked": "Relay node revoked",
+    "action_relay_node_renamed": "Relay node renamed",
+    "action_relay_node_enrolled": "Relay node joined",
+    "action_relay_node_auth_failed": "Relay node refused",
+    "action_relay_node_tickets": "Relay node sessions counted",
+    "action_device_site_pinned": "Device site changed",
+    "action_folder_site_pinned": "Folder site changed",
+    "action_site_created": "Site created",
+    "action_site_updated": "Site changed",
+    "action_site_deleted": "Site deleted",
+    "action_site_networks_updated": "Site networks changed"
   },
   "generator": {
     "title": "NeoDesk Support Generator",

@@ -2425,7 +2425,19 @@
     "action_fleet_workflow_run": "Workflow ausgeführt",
     "action_quick_support_receiver_offer": "Installationsangebot nach der Schnellhilfe geändert",
     "action_receiver_installer_downloaded": "Installationsprogramm der Empfänger-App heruntergeladen",
-    "action_dashboards_shared_changed": "Geteilte Dashboards veröffentlicht"
+    "action_dashboards_shared_changed": "Geteilte Dashboards veröffentlicht",
+    "action_relay_node_token_created": "Beitrittsschlüssel für Relay-Knoten erstellt",
+    "action_relay_node_revoked": "Relay-Knoten widerrufen",
+    "action_relay_node_renamed": "Relay-Knoten umbenannt",
+    "action_relay_node_enrolled": "Relay-Knoten beigetreten",
+    "action_relay_node_auth_failed": "Relay-Knoten abgewiesen",
+    "action_relay_node_tickets": "Sitzungen des Relay-Knotens gezählt",
+    "action_device_site_pinned": "Standort des Geräts geändert",
+    "action_folder_site_pinned": "Standort des Ordners geändert",
+    "action_site_created": "Standort erstellt",
+    "action_site_updated": "Standort geändert",
+    "action_site_deleted": "Standort gelöscht",
+    "action_site_networks_updated": "Netze des Standorts geändert"
   },
   "generator": {
     "title": "NeoDesk Support Generator",
