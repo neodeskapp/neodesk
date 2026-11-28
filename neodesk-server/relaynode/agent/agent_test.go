@@ -285,6 +285,9 @@ func TestAPushedTicketLetsTheNodesRelayPairTheSession(t *testing.T) {
 func TestReportsWhileOfflineArriveAfterTheNextWelcome(t *testing.T) {
 	e := newEnv(t)
 	a := e.agent(t.TempDir(), e.join("tok-queue"))
+	// The session record names the node: central restarted since the
+	// ticket, so the hub has none
+	e.store.Relayed("u-q")
 	a.SessionStarted("u-q")
 	a.SessionEnded("u-q", 3, 4)
 	e.run(a)

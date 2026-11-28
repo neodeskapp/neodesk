@@ -383,4 +383,14 @@ func TestANodeReportsOnlyItsOwnSessions(t *testing.T) {
 	if e, err := rec.Wait("ended", 2*time.Second); err != nil || e.Node != aID {
 		t.Fatalf("own ended: %+v, %v", e, err)
 	}
+
+	// After a central restart the hub has no ticket; the session record
+	// decides whether the node relayed the session
+	st.Relayed("sess-before-restart")
+	if err := a.Write(wire.Ended{UUID: "sess-before-restart"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if e, err := rec.Wait("ended", 2*time.Second); err != nil || e.UUID != "sess-before-restart" {
+		t.Fatalf("ended of a recorded session: %+v, %v", e, err)
+	}
 }

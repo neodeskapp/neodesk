@@ -481,3 +481,23 @@ func (pg *PostgresDB) SetConnectionSessionRelayVia(relayUUID, via string) error 
 	}
 	return nil
 }
+
+// ConnectionSessionRelayVia is how the sessions of a relay UUID were
+// relayed, "" when no session has that UUID.
+func (pg *PostgresDB) ConnectionSessionRelayVia(relayUUID string) (string, error) {
+	relayUUID = strings.TrimSpace(relayUUID)
+	if relayUUID == "" {
+		return "", nil
+	}
+	ctx, cancel := pg.opCtx()
+	defer cancel()
+	var via string
+	err := pg.pool.QueryRow(ctx, `SELECT relay_via FROM peer_connection_sessions WHERE relay_uuid = $1 AND relay_via <> '' LIMIT 1`, relayUUID).Scan(&via)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("db: connection session relay via: %w", err)
+	}
+	return via, nil
+}

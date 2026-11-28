@@ -498,3 +498,23 @@ func (s *SQLiteDB) SetConnectionSessionRelayVia(relayUUID, via string) error {
 	}
 	return nil
 }
+
+// ConnectionSessionRelayVia is how the sessions of a relay UUID were
+// relayed, "" when no session has that UUID.
+func (s *SQLiteDB) ConnectionSessionRelayVia(relayUUID string) (string, error) {
+	relayUUID = strings.TrimSpace(relayUUID)
+	if relayUUID == "" {
+		return "", nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var via string
+	err := s.db.QueryRow(`SELECT relay_via FROM peer_connection_sessions WHERE relay_uuid = ? AND relay_via <> '' LIMIT 1`, relayUUID).Scan(&via)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("db: connection session relay via: %w", err)
+	}
+	return via, nil
+}

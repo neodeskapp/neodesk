@@ -437,5 +437,16 @@ func TestSiteConnectionSessionRelayVia(t *testing.T) {
 				t.Errorf("session %s relayed via %q; want %q", s.RelayUUID, s.RelayVia, want)
 			}
 		}
+		getter, ok := store.(interface {
+			ConnectionSessionRelayVia(string) (string, error)
+		})
+		if !ok {
+			t.Fatal("the store cannot read a session's relay via")
+		}
+		for uuid, want := range map[string]string{"uuid-1": "node:n1", "uuid-2": "", "missing": ""} {
+			if got, err := getter.ConnectionSessionRelayVia(uuid); err != nil || got != want {
+				t.Errorf("relay via of %s: %q %v; want %q", uuid, got, err, want)
+			}
+		}
 	})
 }

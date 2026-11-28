@@ -125,3 +125,10 @@ func LoadOrCreateCert(dir string) (cert tls.Certificate, pin string, err error) 
 	}
 	return cert, pin, nil
 }
+
+// SessionOwner is an optional part of Store: whether the node relayed the
+// session uuid. The hub asks it for an ended report it holds no ticket
+// for, which happens after a central restart (tickets live in memory).
+type SessionOwner interface {
+	NodeRelayedSession(nodeID, uuid string) bool
+}

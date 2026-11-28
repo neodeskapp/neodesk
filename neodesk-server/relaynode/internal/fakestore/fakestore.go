@@ -20,6 +20,24 @@ type Store struct {
 	used     map[string]bool
 	nodes    map[string]*hub.Node
 	consumed int
+	// relayed are the session uuids NodeRelayedSession says yes to, for
+	// any node
+	relayed map[string]bool
+}
+
+// Relayed makes NodeRelayedSession report uuid as relayed by any node,
+// as the session record does after a central restart.
+func (s *Store) Relayed(uuid string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.relayed[uuid] = true
+}
+
+// NodeRelayedSession is hub.SessionOwner.
+func (s *Store) NodeRelayedSession(_, uuid string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.relayed[uuid]
 }
 
 // Consumed is the number of successful token uses.
@@ -36,6 +54,8 @@ func New() *Store {
 		tokens: map[string]string{},
 		used:   map[string]bool{},
 		nodes:  map[string]*hub.Node{},
+
+		relayed: map[string]bool{},
 	}
 }
 

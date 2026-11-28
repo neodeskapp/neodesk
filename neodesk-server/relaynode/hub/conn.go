@@ -165,6 +165,13 @@ func (nc *nodeConn) handle(f wire.Frame) {
 		}
 		h.mu.Unlock()
 		if !known {
+			// Central restarted since the ticket: the session record
+			// says which node relayed it
+			if o, ok := h.cfg.Store.(SessionOwner); ok && o.NodeRelayedSession(nc.nodeID, m.UUID) {
+				known = true
+			}
+		}
+		if !known {
 			nc.foreignSession("ended", m.UUID)
 			return
 		}

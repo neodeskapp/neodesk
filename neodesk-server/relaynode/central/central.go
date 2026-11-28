@@ -150,6 +150,39 @@ func (g *Glue) NodeSessionEnded(nodeID, uuid string, up, down int64) {
 	signal.ForgetRelayVia(uuid)
 }
 
+// NodeRelayedSession reports whether signal sent the session uuid through
+// the node, from memory or, after a restart, from the session record.
+func (g *Glue) NodeRelayedSession(nodeID, uuid string) bool {
+	via := signal.RelayVia(uuid)
+	if via == "" {
+		if r, ok := g.DB.(interface {
+			ConnectionSessionRelayVia(relayUUID string) (string, error)
+		}); ok {
+			via, _ = r.ConnectionSessionRelayVia(uuid)
+		}
+	}
+	return viaHasNode(via, nodeID)
+}
+
+// viaHasNode reports whether a relay_via value ("node:<id>",
+// "nodes:<a>,<b>") names the node.
+func viaHasNode(via, nodeID string) bool {
+	if nodeID == "" {
+		return false
+	}
+	if id, ok := strings.CutPrefix(via, "node:"); ok {
+		return id == nodeID
+	}
+	if ids, ok := strings.CutPrefix(via, "nodes:"); ok {
+		for _, id := range strings.Split(ids, ",") {
+			if id == nodeID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // NodeStats needs nothing here: the hub keeps the counts for the console.
 func (g *Glue) NodeStats(string, wire.Stats) {}
 
@@ -214,6 +247,7 @@ func (g *Glue) Audit(event string, fields map[string]string) {
 
 var (
 	_ hub.Store         = (*Glue)(nil)
+	_ hub.SessionOwner  = (*Glue)(nil)
 	_ hub.Events        = (*Glue)(nil)
 	_ hub.Auditor       = (*Glue)(nil)
 	_ signal.SiteRouter = (*Glue)(nil)
