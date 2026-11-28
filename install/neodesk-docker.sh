@@ -88,7 +88,7 @@ HEALTH_TIMEOUT="${NEODESK_HEALTH_TIMEOUT:-180}"
 KEEP_BACKUPS=5
 # 21114: the API for RustDesk clients without an API server setting,
 # which derive it from the ID server's port (21116 - 2)
-DOCKER_PORTS_TCP=(21114 21115 21116 21117 21118 21119 21121 21122)
+DOCKER_PORTS_TCP=(21114 21115 21116 21117 21118 21119 21121 21122 21123)
 DOCKER_PORTS_UDP=(21116)
 
 # Colours: 24-bit where the terminal says it has them (COLORTERM), else the
@@ -1924,7 +1924,7 @@ print_summary() {
     say "  API server:    http://${addr}:21121"
     say "  Key:           ${key:-not made yet; later: docker exec neodesk cat /opt/neodesk/data/id_ed25519.pub}"
     say ""
-    say "Ports to open in a firewall in front of this machine: TCP $(console_firewall_ports "$domain")21114-21119, 21121, 21122 and UDP 21116"
+    say "Ports to open in a firewall in front of this machine: TCP $(console_firewall_ports "$domain")21114-21119, 21121-21123 and UDP 21116"
     if [ "$(env_get NEODESK_IPV6)" = true ]; then
         say "IPv6:            the containers' network has IPv6 (NEODESK_IPV6), so the console sees IPv6 visitors' own addresses."
         say "                 Docker publishes the ports past ufw and firewalld on IPv6 as on IPv4: closing one there does not block it."

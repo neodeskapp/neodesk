@@ -266,6 +266,11 @@ func serverMain(stop <-chan struct{}) (exitCode int) {
 	logCleanup := logging.Setup(cfg.LogFormat, cfg.LogLevel)
 	defer logCleanup()
 
+	// A relay node runs the relay alone: no database, console or signal
+	if cfg.Mode == "node" {
+		return runRelayNode(cfg, os.Getenv, nodeFlags{}, stop, pending.Ready)
+	}
+
 	if sqliteAuthConsolidationRollback != "" {
 		if err := db.RollbackSQLiteAuth(cfg.DBPath, sqliteAuthConsolidationRollback); err != nil {
 			logging.Fatalf("SQLite auth consolidation rollback failed: %v", err)
@@ -705,6 +710,11 @@ func serverMain(stop <-chan struct{}) (exitCode int) {
 			logging.Fatalf("Failed to start relay server: %v", err)
 		}
 		defer relaySrv.Stop()
+
+		relayNodes := startRelayNodeHub(ctx, cfg, kp, database, billingSvc, sig)
+		if relayNodes != nil {
+			defer relayNodes.Hub.Stop()
+		}
 
 		apiSrv := api.New(cfg, database, sig.PeerMap(), relaySrv, Version)
 		defer attachPanelSync(apiSrv, billingSvc, database, cfg.DBPath, cfg.AuthDBPath)()
@@ -1452,7 +1462,7 @@ func configure(fs *flag.FlagSet, args []string) (cfg *config.Config, showVersion
 	fs.IntVar(&cfg.SignalPort, "port", cfg.SignalPort, "Signal server port (UDP+TCP)")
 	fs.IntVar(&cfg.RelayPort, "relay-port", cfg.RelayPort, "Relay server port (TCP)")
 	fs.IntVar(&cfg.APIPort, "api-port", cfg.APIPort, "HTTP API port")
-	fs.StringVar(&cfg.Mode, "mode", cfg.Mode, "Server mode: all, the only mode (signal, relay, API and console in one process)")
+	fs.StringVar(&cfg.Mode, "mode", cfg.Mode, "Server mode: all (signal, relay, API and console in one process) or node (a relay node of a site, NODE_* settings)")
 	fs.StringVar(&cfg.DBPath, "db", cfg.DBPath, "Database DSN: SQLite path or postgres://... URI")
 	fs.StringVar(&cfg.KeyFile, "key-file", cfg.KeyFile, "Ed25519 key file path (without extension)")
 	fs.StringVar(&cfg.RelayServers, "relay-servers", cfg.RelayServers, "Comma-separated relay server addresses")
@@ -1521,18 +1531,19 @@ func configure(fs *flag.FlagSet, args []string) (cfg *config.Config, showVersion
 	return cfg, false, nil
 }
 
-// checkMode says why a server mode cannot start, nil for "all". The relay
-// pairs only the connections that the signal server of the same process
-// authorized, so the two cannot run in separate processes: MODE=signal and
-// MODE=relay are refused.
+// checkMode says why a server mode cannot start, nil for "all" and
+// "node". The relay pairs only the connections that the signal server of
+// the same process authorized, so the two cannot run in separate
+// processes: MODE=signal and MODE=relay are refused. MODE=node is a relay
+// node whose tickets central pushes over its control connection.
 func checkMode(mode string) error {
 	switch mode {
-	case "all":
+	case "all", "node":
 		return nil
 	case "signal", "relay":
 		return fmt.Errorf("MODE=%s (-mode %s) is not supported: the relay only pairs connections that the signal server of the same process authorized, so signal and relay cannot run apart. Use MODE=all (-mode all), the combined mode that runs signal, relay, API and console together", mode, mode)
 	default:
-		return fmt.Errorf("invalid mode %q: use MODE=all (-mode all), the combined mode that runs signal, relay, API and console together", mode)
+		return fmt.Errorf("invalid mode %q: use MODE=all (-mode all), the combined mode that runs signal, relay, API and console together, or MODE=node for a relay node of a site", mode)
 	}
 }
 

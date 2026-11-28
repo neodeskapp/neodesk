@@ -27,15 +27,33 @@ import (
 const setupCommand = "/usr/local/sbin/neodesk-setup"
 
 // setupFlags are the options of neodesk.sh, without --help and -h
-// (neodesk --help is the command line's). A call that starts with one of
-// them goes to neodesk-setup as it is. TestSetupFlagsAreTheInstallers
-// compares the list with neodesk.sh's argument loop.
+// (neodesk --help is the command line's) and without setupNodeFlags. A
+// call that starts with one of them goes to neodesk-setup as it is.
+// TestSetupFlagsAreTheInstallers compares the two lists with neodesk.sh's
+// argument loop.
 var setupFlags = []string{
 	"--auto", "-a", "--skip-verify", "--minimal", "--uninstall", "--purge",
 	"--check-permissions", "--check-capabilities", "--repair-permissions", "--set-config",
 	"--nodejs", "--flask", "--update", "--reset-password", "--reset-two-factor",
 	"--binary", "--from-source", "--channel", "--postgresql", "--postgres",
 	"--relay-mode", "--relay-servers", "--relay", "--protocol", "--pg-uri",
+	"--node",
+}
+
+// setupNodeFlags are the options of neodesk.sh that only qualify --node.
+// The desktop client has a --join of its own, so a call that starts with
+// one of them goes to neodesk-setup only when --node is in it too:
+// `neodesk --join nd1.... --node`. Without --node it stays with the
+// client or the command line.
+var setupNodeFlags = []string{"--join", "--lan-addr", "--public-addr"}
+
+// isSetupCall reports whether args, not empty, are a call of the
+// installer's.
+func isSetupCall(args []string) bool {
+	if slices.Contains(setupFlags, args[0]) {
+		return true
+	}
+	return slices.Contains(setupNodeFlags, args[0]) && slices.Contains(args, "--node")
 }
 
 // setupCall is what the hand-over needs from the process. Tests replace it.
@@ -66,7 +84,7 @@ func handToSetup(args []string, c setupCall) (code int, handled bool) {
 		}
 		return c.run(path, nil), true
 	}
-	if !slices.Contains(setupFlags, args[0]) {
+	if !isSetupCall(args) {
 		return 0, false
 	}
 	path, ok := c.find()

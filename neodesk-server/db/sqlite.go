@@ -719,6 +719,7 @@ func (s *SQLiteDB) migrateSchema() error {
 		serverEventsActionIndex,
 	}
 	statements = append(statements, fleetSchema("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER")...)
+	statements = append(statements, sqliteSitesSchema...)
 
 	for _, stmt := range statements {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -779,6 +780,8 @@ func (s *SQLiteDB) migrateSchema() error {
 		// peer_metrics: network rates of NeoDesk telemetry (L480)
 		{"peer_metrics", "net_rx_bps", `ALTER TABLE peer_metrics ADD COLUMN net_rx_bps REAL DEFAULT NULL`},
 		{"peer_metrics", "net_tx_bps", `ALTER TABLE peer_metrics ADD COLUMN net_tx_bps REAL DEFAULT NULL`},
+		// peer_connection_sessions: how a session was relayed (sites and relay nodes)
+		{"peer_connection_sessions", "relay_via", `ALTER TABLE peer_connection_sessions ADD COLUMN relay_via TEXT NOT NULL DEFAULT ''`},
 	}
 
 	for _, m := range columnMigrations {
@@ -1733,7 +1736,7 @@ func (s *SQLiteDB) ListPeerConnectionSessions(hostID string, limit int) ([]*Peer
 
 	rows, err := s.db.Query(
 		`SELECT id, host_id, peer_id, peer_name, peer_ip, username, transport, relay_uuid,
-		        started_at, ended_at, source
+		        started_at, ended_at, source, relay_via
 		 FROM peer_connection_sessions
 		 WHERE host_id = ?
 		 ORDER BY started_at DESC, id DESC
@@ -1752,7 +1755,7 @@ func (s *SQLiteDB) ListPeerConnectionSessions(hostID string, limit int) ([]*Peer
 		if err := rows.Scan(
 			&sess.ID, &sess.HostID, &sess.PeerID, &sess.PeerName, &sess.PeerIP,
 			&sess.Username, &sess.Transport, &sess.RelayUUID,
-			&started, &ended, &sess.Source,
+			&started, &ended, &sess.Source, &sess.RelayVia,
 		); err != nil {
 			return nil, err
 		}

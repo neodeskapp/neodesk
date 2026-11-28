@@ -4,6 +4,20 @@
 # over HTTPS first when it serves HTTPS (TLS_API for the API, HTTPS_ENABLED
 # for the console), then over plain HTTP, so a missing certificate (the
 # server then falls back to HTTP) does not make the container unhealthy.
+#
+# A relay node (MODE=node) has no API and no console: it is healthy when
+# its relay takes connections on the TCP port (RELAY_PORT, 21117) and the
+# WebSocket port two above it.
+
+if [ "${MODE:-}" = node ]; then
+    relay_port="${RELAY_PORT:-21117}"
+    case "$relay_port" in
+        ''|*[!0-9]*) exit 1 ;;
+    esac
+    nc -z -w 5 127.0.0.1 "$relay_port" || exit 1
+    nc -z -w 5 127.0.0.1 "$((relay_port + 2))" || exit 1
+    exit 0
+fi
 
 is_on() {
     case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in

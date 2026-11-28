@@ -15,6 +15,10 @@ func (s *Server) revokeBannedPeerAccess(peerID string, session *db.ClientSession
 	}
 
 	s.ticketStore().RevokeForPeer(peerID)
+	// Relay nodes hold tickets of their own
+	if r, ok := s.sites().(interface{ RevokeForPeer(string) }); ok {
+		r.RevokeForPeer(peerID)
+	}
 	if s.peers != nil {
 		s.peers.Remove(peerID)
 	}

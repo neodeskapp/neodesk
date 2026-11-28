@@ -41,16 +41,17 @@ func TestSharedDatabaseStartOrders(t *testing.T) {
 				}
 				storetest.ApplyDump(t, reference, readTestdata(t, "dumps/shared-"+db.Dialect().String()+"-"+order.dump+".sql"))
 				// The signal server's tables the dump predates:
-				// blocklist_entries (L127), server_events (L91) and the seven
-				// fleet tables
+				// blocklist_entries (L127), server_events (L91), the seven
+				// fleet tables, server_instances and the six of sites and
+				// their relay nodes
 				storetest.GoServerMigrate(t, reference)
 				createGoTables(t, reference)
 				// On PostgreSQL alert_rules.condition_value is double
 				// precision (BUGS AE4); access_tokens has token_kind (BUGS
 				// RV1)
 				want := readCatalog(t, reference).without(sessionTable).wideConditionValue().withTokenKind(db.IsPostgres()).withLater(db.IsPostgres())
-				if n := len(want.tables()); n != 99+len(goTables) {
-					t.Fatalf("the shared dump and the Go tables are %d tables besides %s, want %d", n, sessionTable, 99+len(goTables))
+				if n := len(want.tables()); n != 105+len(goTables) {
+					t.Fatalf("the shared dump and the Go tables are %d tables besides %s, want %d", n, sessionTable, 105+len(goTables))
 				}
 				requireSameCatalog(t, "shared database against the dump", want, got)
 

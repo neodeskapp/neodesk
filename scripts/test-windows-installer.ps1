@@ -934,15 +934,16 @@ function Test-UpdateAsksTheFork {
 
 # L67: both installers open the same ports: the API port of stock RustDesk
 # clients without an API server setting (21114), RustDesk's (21115 to 21117
-# TCP, 21116 UDP), the client API port, 21122 while CDAP is on, and the
+# TCP, 21116 UDP), the client API port, 21122 while CDAP is on, the relay
+# nodes' control port (21123, off with NODE_CONTROL_PORT=0), and the
 # console's ports unless TLS ends at a reverse proxy.
 function Test-FirewallPorts {
     $dir = New-TestInstall
     $envFile = Join-Path $script:CONSOLE_PATH '.env'
     Set-Content -Path $envFile -Value @('API_PORT=21121', 'CONSOLE_PORT=5000', 'HTTPS_ENABLED=true', 'HTTPS_PORT=5443', 'CDAP_ENABLED=Y', 'TRUST_PROXY=false')
     $got = (Get-FirewallPorts | ForEach-Object { "$($_.Port)/$($_.Proto)" }) -join ' '
-    if ($got -ne '21114/TCP 21115/TCP 21116/TCP 21116/UDP 21117/TCP 21121/TCP 21122/TCP 5000/TCP 5443/TCP') { Fail "the firewall ports: $got" }
-    Set-Content -Path $envFile -Value @('API_PORT=21121', 'CONSOLE_PORT=5000', 'HTTPS_ENABLED=false', 'CDAP_ENABLED=N', 'TRUST_PROXY=Y')
+    if ($got -ne '21114/TCP 21115/TCP 21116/TCP 21116/UDP 21117/TCP 21121/TCP 21122/TCP 21123/TCP 5000/TCP 5443/TCP') { Fail "the firewall ports: $got" }
+    Set-Content -Path $envFile -Value @('API_PORT=21121', 'CONSOLE_PORT=5000', 'HTTPS_ENABLED=false', 'CDAP_ENABLED=N', 'TRUST_PROXY=Y', 'NODE_CONTROL_PORT=0')
     $got = (Get-FirewallPorts | ForEach-Object { "$($_.Port)/$($_.Proto)" }) -join ' '
     if ($got -ne '21114/TCP 21115/TCP 21116/TCP 21116/UDP 21117/TCP 21121/TCP') { Fail "the firewall ports behind a reverse proxy without CDAP: $got" }
     Remove-Item -Recurse -Force $dir

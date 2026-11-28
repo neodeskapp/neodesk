@@ -135,8 +135,8 @@ func New(o Options) *Service {
 
 // paths are the files a full backup holds, resolveBackupPaths.
 type paths struct {
-	env, sessionSecret, uploadsDir, chatFilesDir, attachmentsDir, consoleDB, goPrivKey, goPubKey, goAPIKey, goDB, meshAgentCert string
-	fontsDir, certFile, keyFile, caFile, endpointsFile                                                                          string
+	env, sessionSecret, uploadsDir, chatFilesDir, attachmentsDir, consoleDB, goPrivKey, goPubKey, goAPIKey, goDB, meshAgentCert, nodeControlCert, nodeControlKey string
+	fontsDir, certFile, keyFile, caFile, endpointsFile                                                                                                           string
 }
 
 func (s *Service) paths() paths {
@@ -151,11 +151,15 @@ func (s *Service) paths() paths {
 		goAPIKey:       s.o.APIKeyPath,
 		goDB:           s.serverDBFile(),
 		meshAgentCert:  filepath.Join(s.o.KeysPath, "mesh_agent_server.pem"),
-		fontsDir:       s.o.FontsDir,
-		certFile:       s.o.CertFile,
-		keyFile:        s.o.KeyFile,
-		caFile:         s.o.CAFile,
-		endpointsFile:  s.o.EndpointsFile,
+		// relay nodes pin this certificate: a restore without it makes
+		// every node refuse the server until it joins again
+		nodeControlCert: filepath.Join(s.o.KeysPath, "node_control.crt"),
+		nodeControlKey:  filepath.Join(s.o.KeysPath, "node_control.key"),
+		fontsDir:        s.o.FontsDir,
+		certFile:        s.o.CertFile,
+		keyFile:         s.o.KeyFile,
+		caFile:          s.o.CAFile,
+		endpointsFile:   s.o.EndpointsFile,
 	}
 	p.consoleDB = p.goDB
 	return p
@@ -359,6 +363,7 @@ type Manifest struct {
 //	goserver/.api_key                the API key
 //	goserver/db_v2.sqlite3           the same copy as the server's database
 //	goserver/mesh_agent_server.pem   the mesh agent certificate
+//	goserver/node_control.crt/.key   the certificate relay nodes pin
 //	README.txt                       how to restore by hand
 //
 // A part whose file is missing or unreadable is left out; the dump is
@@ -534,6 +539,8 @@ func recoveryReadme(m Manifest) string {
 		"     goserver/id_ed25519.pub -> <keysPath>/id_ed25519.pub",
 		"     goserver/.api_key       -> <keysPath>/.api_key",
 		"     goserver/mesh_agent_server.pem -> <keysPath>/mesh_agent_server.pem",
+		"     goserver/node_control.crt -> <keysPath>/node_control.crt",
+		"     goserver/node_control.key -> <keysPath>/node_control.key",
 		"     goserver/db_v2.sqlite3  -> DB_PATH (SQLite only)",
 		"On Docker <dataDir> and <keysPath> are /app/data and /opt/neodesk/data.",
 		"With PostgreSQL the dump in console/data.json goes back only through",
@@ -706,6 +713,8 @@ func (s *Service) RestoreFullBackup(ctx context.Context, buf []byte, o RestoreOp
 			{"goserver/id_ed25519.pub", p.goPubKey, 0o644},
 			{"goserver/.api_key", p.goAPIKey, 0o600},
 			{"goserver/mesh_agent_server.pem", p.meshAgentCert, 0o600},
+			{"goserver/node_control.crt", p.nodeControlCert, 0o600},
+			{"goserver/node_control.key", p.nodeControlKey, 0o600},
 		}, tlsEntries(p)...) {
 			data, ok := files.Get(f.name)
 			if !ok || f.target == "" {
@@ -811,6 +820,12 @@ var serverTables = map[string]bool{
 	// server_instances rows of a restored dump are long past their last_seen,
 	// so the start check ignores them
 	"server_instances": true,
+	// Sites and their relay nodes. A node's row holds its public key, the
+	// one it proves at every connect, so a restore without it would make
+	// each node join again. Enrollment tokens are stored hashed, used once
+	// and expire, so a restored one is no use past its expiry.
+	"sites": true, "site_networks": true, "relay_nodes": true, "site_enrollment_tokens": true,
+	"site_pins": true, "site_reachability": true,
 }
 
 // dumpHasServerTables reports whether a dump holds any of the server's own

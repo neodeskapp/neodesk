@@ -127,6 +127,9 @@ func TestTheInstallersFlagsGoToNeodeskSetup(t *testing.T) {
 	for _, flag := range installerFlags(t) {
 		_ = os.Remove(record)
 		args := []string{flag, "two words", "--json"}
+		if slices.Contains(setupNodeFlags, flag) {
+			args = append(args, "--node")
+		}
 		code, _, stderr := runAsNeodesk(t, dir, args...)
 		got, _ := os.ReadFile(record)
 		want := "called\n" + strings.Join(args, "\n") + "\n"
@@ -188,10 +191,11 @@ func TestABareSudoNeodeskOnATerminalOpensTheMenu(t *testing.T) {
 	}
 }
 
-// The installer's options are kept once, in setupFlags; a new option of
-// neodesk.sh must go into it, or neodesk would take it for its own.
+// The installer's options are kept once, in setupFlags and
+// setupNodeFlags; a new option of neodesk.sh must go into one of them, or
+// neodesk would take it for its own.
 func TestSetupFlagsAreTheInstallers(t *testing.T) {
-	got := slices.Sorted(slices.Values(setupFlags))
+	got := slices.Sorted(slices.Values(slices.Concat(setupFlags, setupNodeFlags)))
 	if want := installerFlags(t); !slices.Equal(got, want) {
 		t.Errorf("setupFlags are %v,\nneodesk.sh takes %v", got, want)
 	}
@@ -224,6 +228,10 @@ func TestWhichCallsGoToNeodeskSetup(t *testing.T) {
 		{"--help", []string{"--help"}, true, true, true, nil, 0},
 		{"devices list", []string{"devices", "list"}, true, true, true, nil, 0},
 		{"--json --update", []string{"--json", "--update"}, true, true, true, nil, 0},
+		{"--join --node", []string{"--join", "nd1.x", "--node"}, false, false, true, &ran{setupCommand, []string{"--join", "nd1.x", "--node"}}, 7},
+		{"--lan-addr --node", []string{"--lan-addr", "10.0.0.5:21117", "--node"}, false, false, true, &ran{setupCommand, []string{"--lan-addr", "10.0.0.5:21117", "--node"}}, 7},
+		{"--join, the client's", []string{"--join", "https://desk.example.com/join/ABCDEF23"}, true, true, true, nil, 0},
+		{"--lan-addr without --node", []string{"--lan-addr", "10.0.0.5:21117"}, true, true, true, nil, 0},
 	} {
 		var got *ran
 		var stderr strings.Builder

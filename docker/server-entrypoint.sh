@@ -7,6 +7,29 @@ set -e
 . /ensure-app-user.sh
 ensure_neodesk_user
 
+# A relay node (MODE=node, or neodesk-server node): no database, no
+# console and no admin account. Its data folder (NODE_DATA_DIR, the
+# volume at /opt/neodesk/data) holds node.key and node.json; only neodesk
+# may read it.
+node_mode() {
+    [ "${MODE:-}" = node ] && return 0
+    for arg do
+        [ "$arg" = node ] && return 0
+    done
+    return 1
+}
+if node_mode "$@"; then
+    export MODE=node
+    export NODE_DATA_DIR="${NODE_DATA_DIR:-/opt/neodesk/data}"
+    if [ "$(id -u)" = "0" ]; then
+        mkdir -p "$NODE_DATA_DIR"
+        chown -R neodesk:neodesk "$NODE_DATA_DIR" 2>/dev/null || true
+        chmod 700 "$NODE_DATA_DIR" 2>/dev/null || true
+        set -- su-exec neodesk "$@"
+    fi
+    exec "$@"
+fi
+
 # The data volume, at /opt/neodesk/data, or where a compose file of
 # 3.6.0-rc.4 or older still mounts it; the server's arguments follow
 # shellcheck source=docker/data-path.sh

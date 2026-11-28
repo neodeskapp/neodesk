@@ -101,6 +101,25 @@
 .PARAMETER Minimal
     Install the server with its web console off (CONSOLE_PORT=0 in .env).
 
+.PARAMETER Node
+    Make this machine a relay node of a site instead of a server: the
+    service NeoDeskRelayNode in C:\NeoDeskRelayNode, the server binary in
+    node mode without database or console. A server install here stays as
+    it is. Run again to update the node; with -Uninstall it is removed
+    (-Purge also removes its key).
+
+.PARAMETER Join
+    With -Node: the join string the console shows under Sites (the first
+    install only).
+
+.PARAMETER LanAddr
+    With -Node: host:port devices in the LAN dial the relay at (default:
+    this machine's LAN address, port 21117).
+
+.PARAMETER PublicAddr
+    With -Node: host:port devices outside the LAN dial the relay at,
+    through a port forward (default: none, only LAN devices use the node).
+
 .PARAMETER Help
     Show this help: every parameter, and the environment variables
     ADMIN_PASSWORD, RELAY_SERVERS, RELAY_MODE, POSTGRESQL_URI,
@@ -139,6 +158,10 @@
     Skip binary verification
 
 .EXAMPLE
+    .\neodesk.ps1 -Node -Join nd1.xxxx -PublicAddr 203.0.113.20:21117
+    Make this machine a relay node of the site the join string names
+
+.EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File C:\NeoDesk\neodesk.ps1 -ResetPassword
     A new password for admin, from any elevated window whatever the
     machine's execution policy
@@ -175,6 +198,10 @@ param(
     [switch]$RepairPermissions,
     [string[]]$SetConfig = @(),
     [switch]$Flask,  # No longer needed: the web console is part of the server
+    [switch]$Node,
+    [string]$Join = "",
+    [string]$LanAddr = "",
+    [string]$PublicAddr = "",
     [switch]$Help
 )
 
@@ -1692,12 +1719,13 @@ function Merge-EnvironmentLists {
 # writes its log itself: logs\server.log, moved to server.log.1 at 10 MB.
 # $false when Windows refused the service.
 function Set-ServerService {
-    param([string]$Arguments, [string[]]$Environment)
+    # No version in the name: the console's own updates replace the binary, not the service
+    param([string]$Arguments, [string[]]$Environment, [string]$DisplayName = "NeoDesk Server",
+        [string]$Description = "NeoDesk server and web console (signal, relay, API, console)")
     $name = $script:SERVER_SERVICE
     $commandLine = Get-ServerServiceCommandLine -Arguments $Arguments
-    # No version: the console's own updates replace the binary, not the service
-    $displayName = "NeoDesk Server"
-    $description = "NeoDesk server and web console (signal, relay, API, console)"
+    $displayName = $DisplayName
+    $description = $Description
     $info = Get-ServerServiceInfo
     try {
         if (-not $info) {
@@ -3958,6 +3986,7 @@ function Check-PortStatus {
 # without an API server setting calls (the signal port minus 2, 21114:
 # callers from other hosts get only the client API there), RustDesk's (NAT
 # test, signal TCP and UDP, relay), the client API port, the CDAP gateway (21122) while CDAP is on,
+# the relay nodes' control port (NODE_CONTROL_PORT, 21123, 0 is off),
 # and the console's ports unless TLS ends at a reverse proxy (TRUST_PROXY).
 function Get-FirewallPorts {
     $signal = [int](Get-SignalPort)
@@ -3975,6 +4004,9 @@ function Get-FirewallPorts {
     if ((Get-ConsoleEnvValue -Key "CDAP_ENABLED") -notmatch '^(?i)(n|no|0|false|off)$') {
         $ports += @{Port = 21122; Proto = "TCP"; Name = "NeoDesk CDAP gateway"}
     }
+    $control = Get-ConsoleEnvValue -Key "NODE_CONTROL_PORT"
+    if (-not $control) { $control = "21123" }
+    if ($control -ne "0") { $ports += @{Port = [int]$control; Proto = "TCP"; Name = "NeoDesk relay node control"} }
     if (Test-BehindProxy) { return $ports }
     $http = Get-ConsoleEnvValue -Key "CONSOLE_PORT"
     if (-not $http) { $http = "3375" }
@@ -5531,7 +5563,81 @@ function Get-AutoAction {
     return "install"
 }
 
+#===============================================================================
+# Relay node (-Node)
+#===============================================================================
+# A relay node is the server binary in node mode at a site: the site's
+# devices relay through it. It has no database and no web console. A server
+# install here stays as it is: the node is the service NeoDeskRelayNode,
+# with its own folder and virtual account.
+
+$script:NODE_PATH = if ($env:NEODESK_NODE_PATH) { $env:NEODESK_NODE_PATH } else { "C:\NeoDeskRelayNode" }
+
+# The address as host:port, with the relay port 21117 when it names none;
+# $null for anything but a host name, an IPv4 address or [IPv6].
+function Get-NodeAddress {
+    param([string]$Address)
+    if ($Address -match '^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)$') { $Address += ":21117" }
+    if ($Address -match '^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):\d{1,5}$') { return $Address }
+    return $null
+}
+
+function Do-RelayNode {
+    # From here on the server's helpers work on the node's folder and service
+    $script:RUSTDESK_PATH = $script:NODE_PATH
+    $script:CONSOLE_PATH = $script:NODE_PATH
+    $script:SERVER_SERVICE = "NeoDeskRelayNode"
+    $data = Join-Path $script:NODE_PATH "data"
+    if ($script:UNINSTALL_MODE) {
+        Stop-Service -Name $script:SERVER_SERVICE -Force -ErrorAction SilentlyContinue
+        if (Test-ServerIsService) { Invoke-ServiceControl delete $script:SERVER_SERVICE | Out-Null }
+        Get-NetFirewallRule -DisplayName "NeoDesk relay node - *" -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        Get-ChildItem $script:NODE_PATH -ErrorAction SilentlyContinue | Where-Object { $script:PURGE_MODE -or $_.Name -ne "data" } | Remove-Item -Recurse -Force
+        if ($script:PURGE_MODE) { Remove-Item $script:NODE_PATH -Recurse -Force -ErrorAction SilentlyContinue; Print-Success "Relay node removed with its key; remove it in the console too (Sites)" }
+        else { Print-Success "Relay node removed; its key stays in $data (-Purge removes it)" }
+        return $true
+    }
+    $enrolled = Test-Path (Join-Path $data "node.json")
+    $old = @{}
+    foreach ($line in (Get-ServerServiceEnvironment)) { $pair = $line -split '=', 2; $old[$pair[0]] = $pair[1] }
+    $joinValue = if ($Join) { $Join } else { $old["NODE_JOIN"] }
+    if ($Join -and $Join -notmatch '^nd1\.[A-Za-z0-9_=-]+$') { Print-Error "-Join takes the join string the console shows under Sites (nd1. and the rest of it)"; return $false }
+    if ($Join -and $enrolled) { Print-Error "This machine is a relay node already ($data\node.json). Run without -Join to update it; to join another site, first -Node -Uninstall -Purge"; return $false }
+    if (-not $joinValue -and -not $enrolled) { Print-Error "-Join is needed: the join string the console shows under Sites"; return $false }
+    $lan = Get-NodeAddress $(if ($LanAddr) { $LanAddr } elseif ($old["NODE_LAN_ADDR"]) { $old["NODE_LAN_ADDR"] } else { Get-LocalIP })
+    $public = if ($PublicAddr) { Get-NodeAddress $PublicAddr } else { [string]$old["NODE_PUBLIC_ADDR"] }
+    if (-not $lan -or ($PublicAddr -and -not $public)) { Print-Error "-LanAddr and -PublicAddr take host:port (an IPv6 address in brackets)"; return $false }
+    if (-not (Get-StagedServerBinary)) { return $false }
+    $ok = [bool](Select-String -Path $script:STAGED_SERVER_BINARY -Pattern 'NODE_JOIN' -SimpleMatch -Quiet)
+    if (-not $ok) { Print-Error "This neodesk-server has no relay node mode yet ($($script:STAGED_SERVER_VERSION))" }
+    if ($ok) { Stop-Service -Name $script:SERVER_SERVICE -Force -ErrorAction SilentlyContinue; $ok = Install-StagedBinary }
+    Remove-Item -Path $script:STAGED_SERVER_DIR -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not $ok) { return $false }
+    New-Item -ItemType Directory -Path $data -Force | Out-Null
+    $environment = @("MODE=node", "NODE_DATA_DIR=$data", "NODE_LAN_ADDR=$lan", "NODE_PUBLIC_ADDR=$public", "NEODESK_SUPERVISOR=windows-service")
+    if (-not $enrolled) { $environment += "NODE_JOIN=$joinValue" }
+    if (-not (Set-ServerService -Arguments "node" -Environment $environment -DisplayName "NeoDesk Relay Node" -Description "NeoDesk relay node of a site")) { return $false }
+    # Only Administrators, SYSTEM and the node's account read its key
+    Protect-Folder -Path $script:NODE_PATH -ServiceAccount | Out-Null
+    foreach ($rule in @(@{ Name = "relay"; Port = 21117 }, @{ Name = "relay over WebSocket"; Port = 21119 })) {
+        if (-not (Get-NetFirewallRule -DisplayName "NeoDesk relay node - $($rule.Name)" -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -DisplayName "NeoDesk relay node - $($rule.Name)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $rule.Port -Profile Any -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
+    Start-Service -Name $script:SERVER_SERVICE -ErrorAction SilentlyContinue
+    # The join string is good for one enrollment: it goes once the node has its node.json
+    for ($i = 0; $i -lt 30 -and -not $enrolled; $i++) { Start-Sleep -Seconds 1; $enrolled = Test-Path (Join-Path $data "node.json") }
+    if ($enrolled) { Set-ServerServiceEnvironment -Environment @($environment | Where-Object { $_ -notlike "NODE_JOIN=*" }) }
+    if ((Get-Service -Name $script:SERVER_SERVICE).Status -ne 'Running') { Print-Error "The service $($script:SERVER_SERVICE) did not start; its log: $(Get-ServerLogPath)"; return $false }
+    if ($enrolled) { Print-Success "Relay node running (LAN $lan, public $(if ($public) { $public } else { 'none' }))" }
+    else { Print-Warning "The relay node runs but has not joined its site yet; its log: $(Get-ServerLogPath)" }
+    return $true
+}
+
 function Main {
+    # A relay node leaves a server install here alone: nothing below runs
+    if ($Node) { exit ([int](-not (Do-RelayNode))) }
+
     # Auto-detect paths on startup
     Write-Host "Detecting installation..." -ForegroundColor Cyan
     Auto-DetectPaths

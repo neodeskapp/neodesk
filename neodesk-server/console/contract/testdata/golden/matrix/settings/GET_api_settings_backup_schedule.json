@@ -202,6 +202,8 @@
          "goserver/id_ed25519",
          "goserver/id_ed25519.pub",
          "goserver/.api_key",
+         "goserver/node_control.crt",
+         "goserver/node_control.key",
          "goserver/db_v2.sqlite3",
          "goserver/mesh_agent_server.pem"
         ],

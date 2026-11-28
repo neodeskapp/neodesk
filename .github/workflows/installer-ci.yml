@@ -277,6 +277,94 @@ jobs:
       - name: Update an install of 3.6.0-rc.4 and restore its backup
         run: NEODESK_TEST_BINARY="$RUNNER_TEMP/neodesk-server" bash scripts/test-docker-data-path.sh
 
+  # install.sh --node on this runner, next to a stand-in server install:
+  # the unit, env file and state folder of the relay node, the update and
+  # the uninstall, with a stand-in binary until the server has node mode
+  relay-node-install:
+    name: Relay node install on this runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install, update and remove a relay node
+        shell: sudo bash {0}
+        run: |
+          set -euo pipefail
+          fail() { echo "FAIL: $*"; exit 1; }
+          # A stand-in for neodesk-server until node mode lands: it answers
+          # -version, carries the strings the installer looks for (upgrade-env
+          # --from FILE, NODE_JOIN) and, as "node", enrolls once with NODE_JOIN
+          fake="$(mktemp -d)/neodesk-server"
+          cat > "$fake" <<'EOF'
+          #!/bin/sh
+          # upgrade-env --from FILE
+          case "$1" in
+              -version) echo "neodesk-server 0.0.0-test"; exit 0 ;;
+              node)
+                  [ "$MODE" = node ] && [ -n "$NODE_DATA_DIR" ] || exit 2
+                  if [ -n "${NODE_JOIN:-}" ] && [ ! -s "$NODE_DATA_DIR/node.json" ]; then
+                      printf '{"node_id":"test"}\n' > "$NODE_DATA_DIR/node.json"
+                  fi
+                  [ -s "$NODE_DATA_DIR/node.json" ] || exit 2
+                  exec sleep infinity
+                  ;;
+          esac
+          exit 1
+          EOF
+          chmod 0755 "$fake"
+          export SERVER_BINARY_FILE="$fake"
+          env_file=/etc/neodesk-relay-node/node.env
+          state=/var/lib/neodesk-relay-node
+          unit=/etc/systemd/system/neodesk-relay-node.service
+
+          help=$(bash install/install.sh --help)
+          grep -q -- '--node' <<< "$help" || fail "install.sh --help names no --node"
+          help=$(bash install/neodesk.sh --help)
+          grep -q -- '--public-addr' <<< "$help" || fail "neodesk.sh --help names no --public-addr"
+
+          # A server install on the same machine stays as it is
+          mkdir -p /opt/neodesk && echo keep > /opt/neodesk/marker
+          printf '[Service]\nExecStart=/bin/true\n' > /etc/systemd/system/neodesk-server.service
+          before=$(sha256sum /etc/systemd/system/neodesk-server.service /opt/neodesk/marker)
+
+          if bash install/install.sh --node --lan-addr 10.0.0.5; then fail "a first install without --join went through"; fi
+          if bash install/install.sh --node --join 'nd1.x;rm -rf /'; then fail "a join string with ; went through"; fi
+          if bash install/install.sh --node --join nd1.eyJ0IjoxfQ --lan-addr 2001:db8::5; then fail "an IPv6 address without brackets went through"; fi
+
+          bash install/install.sh --node --join nd1.eyJ0IjoxfQ --lan-addr 10.0.0.5 --public-addr 203.0.113.7:443
+          systemctl is-active --quiet neodesk-relay-node || fail "the node does not run"
+          [ "$(stat -c '%a %U' "$env_file")" = "600 root" ] || fail "env file: $(stat -c '%a %U' "$env_file")"
+          grep -qx 'MODE=node' "$env_file" || fail "no MODE=node"
+          grep -qx "NODE_DATA_DIR=$state" "$env_file" || fail "no NODE_DATA_DIR"
+          grep -qx 'NODE_LAN_ADDR=10.0.0.5:21117' "$env_file" || fail "LAN address: $(grep NODE_LAN_ADDR "$env_file")"
+          grep -qx 'NODE_PUBLIC_ADDR=203.0.113.7:443' "$env_file" || fail "public address"
+          if grep -q '^NODE_JOIN=' "$env_file"; then fail "the join string stayed after the enrollment"; fi
+          [ "$(stat -c '%a %U' "$state")" = "700 neodesk-relay-node" ] || fail "state folder: $(stat -c '%a %U' "$state")"
+          [ -s "$state/node.json" ] || fail "no node.json"
+          [ "$(ps -o user= -p "$(systemctl show -p MainPID --value neodesk-relay-node)")" = neodesk-relay-node ] || fail "the node does not run as neodesk-relay-node"
+          [ "$(stat -c '%a %U' /opt/neodesk-relay-node/neodesk-server)" = "755 root" ] || fail "binary owner"
+          if command -v systemd-analyze >/dev/null; then
+              out=$(systemd-analyze verify "$unit" 2>&1) || fail "systemd-analyze verify: $out"
+              if [ -n "$out" ]; then echo "systemd-analyze verify says: $out"; fi
+          fi
+
+          # Again without --join: an update that keeps the settings
+          bash install/install.sh --node
+          systemctl is-active --quiet neodesk-relay-node || fail "the node does not run after the update"
+          grep -qx 'NODE_PUBLIC_ADDR=203.0.113.7:443' "$env_file" || fail "the update lost the public address"
+          if bash install/install.sh --node --join nd1.eyJ0IjoyfQ; then fail "a second --join on an enrolled node went through"; fi
+
+          [ "$before" = "$(sha256sum /etc/systemd/system/neodesk-server.service /opt/neodesk/marker)" ] || fail "the server install was touched"
+
+          bash install/install.sh --node --uninstall
+          [ ! -e "$unit" ] && [ ! -e /opt/neodesk-relay-node ] && [ ! -e "$env_file" ] || fail "the uninstall left the unit, binary or env file"
+          [ -s "$state/node.json" ] || fail "the uninstall without --purge removed the key"
+          bash install/install.sh --node --uninstall --purge
+          [ ! -e "$state" ] || fail "--purge left $state"
+          if id neodesk-relay-node >/dev/null 2>&1; then fail "--purge left the account"; fi
+          [ "$before" = "$(sha256sum /etc/systemd/system/neodesk-server.service /opt/neodesk/marker)" ] || fail "the server install was touched"
+          echo "relay node install: all checks passed"
+
   installer-dry-run:
     name: Installer non-mutating CLI checks
     runs-on: ubuntu-latest
@@ -305,9 +393,21 @@ jobs:
           for file in \
             install/docker-compose.single.yml \
             install/docker-compose.quick.single.yml \
-            install/docker-compose.quick.single.macvlan.yml; do
+            install/docker-compose.quick.single.macvlan.yml \
+            install/docker-compose.relay-node.yml; do
             docker compose -f "$file" config --quiet
           done
+      # The relay node runs in node mode, publishes the relay's TCP and
+      # WebSocket ports and keeps its key in the volume
+      - name: Check the relay node's compose file
+        run: |
+          set -euo pipefail
+          config=$(NODE_JOIN=nd1.test docker compose -f install/docker-compose.relay-node.yml config --format json)
+          jq -e '.services["relay-node"] | .environment.MODE == "node" and .environment.NODE_JOIN == "nd1.test"
+            and .environment.NODE_DATA_DIR == "/opt/neodesk/data"
+            and ([.ports[].target] | sort) == [21117, 21119]
+            and ([.volumes[] | select(.target == "/opt/neodesk/data") | .type] == ["volume"])' <<< "$config" >/dev/null \
+            || { echo "install/docker-compose.relay-node.yml:"; jq '.services["relay-node"]' <<< "$config"; exit 1; }
       # The console is published on every address (IPv6 too) unless
       # NEODESK_CONSOLE_BIND names one
       - name: Check the console's published addresses

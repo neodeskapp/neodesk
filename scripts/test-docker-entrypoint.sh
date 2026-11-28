@@ -54,12 +54,14 @@ test_image_has_dsn_helper() (
 
 # L35: the start scripts pass ENROLLMENT_MODE on as the first default and
 # never mark it as forced; ENROLLMENT_MODE_ENV_OVERRIDE is the admin's to
-# set, and every compose file passes it through.
+# set, and every compose file of a server passes it through. A relay node
+# enrolls no devices, so its compose file has no enrollment mode.
 test_enrollment_mode_is_not_forced() (
     local hits f
     hits=$(grep -nE '^[^#]*ENROLLMENT_MODE_ENV_OVERRIDE=' "$SCRIPT_ROOT"/docker/*.sh || true)
     [ -z "$hits" ] || fail "a start script sets ENROLLMENT_MODE_ENV_OVERRIDE: $hits"
     for f in "$SCRIPT_ROOT"/install/docker-compose*.yml; do
+        [ "$(basename "$f")" != docker-compose.relay-node.yml ] || continue
         grep -q 'ENROLLMENT_MODE_ENV_OVERRIDE=${ENROLLMENT_MODE_ENV_OVERRIDE:-}' "$f" \
             || fail "$(basename "$f") does not pass ENROLLMENT_MODE_ENV_OVERRIDE through"
     done
@@ -127,12 +129,14 @@ test_compose_reads_env_file() (
 # to the server, which runs as neodesk; with cap_drop: ALL that needs
 # KILL, else tini dies with "Operation not permitted" and the server is
 # killed without its shutdown. The health check runs every 10 seconds
-# (DOCKER-QUICK-10).
+# (DOCKER-QUICK-10). The relay node's service is relay-node.
 test_neodesk_service_keeps_kill() (
-    local f block
+    local f block service
     for f in "$SCRIPT_ROOT"/install/docker-compose*.yml; do
-        # The neodesk service: from its line to the next service
-        block=$(awk '/^  neodesk:/ { on = 1; next } on && /^  [a-z]/ { exit } on' "$f")
+        service=neodesk
+        [ "$(basename "$f")" != docker-compose.relay-node.yml ] || service=relay-node
+        # The service: from its line to the next service
+        block=$(awk -v s="  $service:" '$0 == s { on = 1; next } on && /^  [a-z]/ { exit } on' "$f")
         printf '%s
 ' "$block" | grep -qE '^      - ALL$' || fail "$(basename "$f"): the neodesk service keeps its capabilities"
         printf '%s

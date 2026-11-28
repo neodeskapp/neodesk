@@ -36,6 +36,8 @@ const (
 	viaCentral = "central"
 	// viaLAN is the server's own relay at its LAN address.
 	viaLAN = "lan"
+	// viaNodePrefix starts the Via of a relay node route: "node:<id>".
+	viaNodePrefix = "node:"
 )
 
 // relayRouteRequest is what chooseRelay picks a route from.
@@ -51,6 +53,16 @@ type relayRouteRequest struct {
 	// policyPeers are the peers whose org network policy
 	// (allowed_relay_servers) applies; none skips the policy.
 	policyPeers []string
+	// initiatorID and targetID name the two peers for relay node routing
+	// (site resolution); either empty skips nodes. a is the initiator's
+	// address and b the target's, unless targetIsA.
+	initiatorID, targetID string
+	targetIsA             bool
+	// relayHint is the relay a peer already dials (a target's
+	// RelayResponse): the route is that relay's node when it is one.
+	relayHint string
+	// noNodes skips relay nodes (the fallback after a node failed).
+	noNodes bool
 }
 
 // chooseRelay picks the relay of a session. Every place that names a relay
@@ -75,6 +87,13 @@ func (s *Server) chooseRelay(req relayRouteRequest) RelayRoute {
 	if req.target != nil {
 		route.TargetAddr = relayAdvertisedToTarget(req.target, addr)
 	}
+	// A relay node at the peers' site replaces the server's relay; the
+	// target gets the node address as it is (its RequestRelay dials what
+	// it is given), not relayAdvertisedToTarget
+	if node, ok := s.nodeRoute(req); ok {
+		route.Addr, route.TargetAddr = node.Addr, node.TargetAddr
+		route.Tickets, route.Via = node.Tickets, node.Via
+	}
 	return route
 }
 
@@ -93,4 +112,14 @@ func (s *Server) ticketStore() relay.Tickets {
 		return relay.DefaultTickets()
 	}
 	return s.tickets
+}
+
+// punchTargetAddr is the relay the PunchHole to the target names: the
+// target's own node on a relay node route (two sites have two nodes),
+// otherwise the initiator's relay as before.
+func (r RelayRoute) punchTargetAddr() string {
+	if isNodeVia(r.Via) {
+		return r.TargetAddr
+	}
+	return r.Addr
 }

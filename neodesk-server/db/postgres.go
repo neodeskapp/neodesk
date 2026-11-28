@@ -748,6 +748,7 @@ func (pg *PostgresDB) Migrate() error {
 		serverEventsActionIndex,
 	}
 	statements = append(statements, fleetSchema("BIGSERIAL PRIMARY KEY", "BIGINT")...)
+	statements = append(statements, postgresSitesSchema...)
 
 	for _, stmt := range statements {
 		if _, err := pg.pool.Exec(pg.ctx, stmt); err != nil {
@@ -806,6 +807,8 @@ func (pg *PostgresDB) Migrate() error {
 		// the device did not measure stays NULL (L480)
 		`ALTER TABLE peer_metrics ADD COLUMN IF NOT EXISTS net_rx_bps REAL`,
 		`ALTER TABLE peer_metrics ADD COLUMN IF NOT EXISTS net_tx_bps REAL`,
+		// peer_connection_sessions: how a session was relayed (sites and relay nodes)
+		`ALTER TABLE peer_connection_sessions ADD COLUMN IF NOT EXISTS relay_via TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE peer_metrics ALTER COLUMN cpu_usage DROP NOT NULL`,
 		`ALTER TABLE peer_metrics ALTER COLUMN memory_usage DROP NOT NULL`,
 		`ALTER TABLE peer_metrics ALTER COLUMN disk_usage DROP NOT NULL`,
@@ -1479,7 +1482,7 @@ func (pg *PostgresDB) ListPeerConnectionSessions(hostID string, limit int) ([]*P
 
 	rows, err := pg.pool.Query(ctx,
 		`SELECT id, host_id, peer_id, peer_name, peer_ip, username, transport, relay_uuid,
-		        started_at, ended_at, source
+		        started_at, ended_at, source, relay_via
 		 FROM peer_connection_sessions
 		 WHERE host_id = $1
 		 ORDER BY started_at DESC, id DESC
@@ -1498,7 +1501,7 @@ func (pg *PostgresDB) ListPeerConnectionSessions(hostID string, limit int) ([]*P
 		if err := rows.Scan(
 			&sess.ID, &sess.HostID, &sess.PeerID, &sess.PeerName, &sess.PeerIP,
 			&sess.Username, &sess.Transport, &sess.RelayUUID,
-			&sess.StartedAt, &ended, &sess.Source,
+			&sess.StartedAt, &ended, &sess.Source, &sess.RelayVia,
 		); err != nil {
 			return nil, err
 		}

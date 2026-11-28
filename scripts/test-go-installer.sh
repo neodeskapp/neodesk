@@ -1677,7 +1677,8 @@ test_update_asks_the_fork() (
 
 # L67: both installers open the same ports: the API port of stock RustDesk
 # clients without an API server setting (21114), RustDesk's (21115 to 21117
-# TCP, 21116 UDP), the client API port, 21122 while CDAP is on, and the
+# TCP, 21116 UDP), the client API port, 21122 while CDAP is on, the relay
+# nodes' control port (21123, off with NODE_CONTROL_PORT=0), and the
 # console's ports unless TLS ends at a reverse proxy.
 test_firewall_ports() (
     load
@@ -1685,9 +1686,9 @@ test_firewall_ports() (
     # console's port, and one set wins over the default (3375)
     printf '[Service]\nEnvironment=NEODESK_SUPERVISOR=systemd\n' > "$SERVER_UNIT"
     printf 'API_PORT=21121\nCONSOLE_PORT=5000\nHTTPS_ENABLED=true\nHTTPS_PORT=5443\nCDAP_ENABLED=Y\nTRUST_PROXY=false\n' > "$CONSOLE_PATH/.env"
-    [ "$(firewall_ports | tr '\n' ' ')" = "21114/tcp 21115/tcp 21116/tcp 21116/udp 21117/tcp 21121/tcp 21122/tcp 5000/tcp 5443/tcp " ] \
+    [ "$(firewall_ports | tr '\n' ' ')" = "21114/tcp 21115/tcp 21116/tcp 21116/udp 21117/tcp 21121/tcp 21122/tcp 21123/tcp 5000/tcp 5443/tcp " ] \
         || fail "the firewall ports: $(firewall_ports | tr '\n' ' ')"
-    printf 'API_PORT=21121\nCONSOLE_PORT=5000\nHTTPS_ENABLED=false\nCDAP_ENABLED=N\nTRUST_PROXY=Y\n' > "$CONSOLE_PATH/.env"
+    printf 'API_PORT=21121\nCONSOLE_PORT=5000\nHTTPS_ENABLED=false\nCDAP_ENABLED=N\nTRUST_PROXY=Y\nNODE_CONTROL_PORT=0\n' > "$CONSOLE_PATH/.env"
     [ "$(firewall_ports | tr '\n' ' ')" = "21114/tcp 21115/tcp 21116/tcp 21116/udp 21117/tcp 21121/tcp " ] \
         || fail "the firewall ports behind a reverse proxy without CDAP: $(firewall_ports | tr '\n' ' ')"
     rm -rf "$TEST_DIR"
