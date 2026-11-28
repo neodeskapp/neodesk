@@ -811,6 +811,12 @@ var serverTables = map[string]bool{
 	// server_instances rows of a restored dump are long past their last_seen,
 	// so the start check ignores them
 	"server_instances": true,
+	// Sites and their relay nodes. A node's row holds its public key, the
+	// one it proves at every connect, so a restore without it would make
+	// each node join again. Enrollment tokens are stored hashed, used once
+	// and expire, so a restored one is no use past its expiry.
+	"sites": true, "site_networks": true, "relay_nodes": true, "site_enrollment_tokens": true,
+	"site_pins": true, "site_reachability": true,
 }
 
 // dumpHasServerTables reports whether a dump holds any of the server's own
