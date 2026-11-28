@@ -353,7 +353,7 @@ func TestNavSectionsAndActivePage(t *testing.T) {
 		ids = append(ids, section.ID)
 		total += len(section.Pages)
 	}
-	if strings.Join(ids, ",") != "devices,support,people,activity,rules,server,settings" || total != 46 {
+	if strings.Join(ids, ",") != "devices,support,people,activity,rules,server,settings" || total != 47 {
 		t.Errorf("admin sees sections %v with %d pages", ids, total)
 	}
 	if nav.ActivePage != nil || nav.ActiveSection != nil {

@@ -6,6 +6,7 @@
 
 import * as v from 'valibot';
 import { api, request, wrapped, BoolLike, Text, Ok, ApiError, clientMessages } from './client.ts';
+import { SiteRef } from './sites.ts';
 
 const Str = Text;
 const Tags = v.pipe(
@@ -77,7 +78,9 @@ export const Device = v.looseObject({
 		v.transform((g) => g ?? [])
 	),
 	/** An RDP or VNC target that is switched off (see listedDevice) */
-	disabled: v.optional(v.boolean(), false)
+	disabled: v.optional(v.boolean(), false),
+	/** The site the device is at; only on a server that has sites (undefined otherwise) */
+	site: v.optional(v.nullable(SiteRef))
 });
 export type Device = v.InferOutput<typeof Device>;
 
@@ -143,6 +146,9 @@ export const DeviceDetail = v.looseObject({
 	telemetry: v.optional(v.nullable(v.looseObject({}))),
 	connection_mode: v.optional(v.nullable(v.looseObject({}))),
 	banned_by: Str,
+	/** The site the device is pinned to, and where its site comes from ("pin", "folder", "network", "") */
+	site_pin: v.optional(v.nullable(SiteRef)),
+	site_source: v.optional(Str),
 	key_request: v.optional(v.nullable(KeyRequest)),
 	/** It came back with another key, which the server refuses: no session reaches it */
 	key_refused: v.optional(v.boolean(), false)
@@ -253,7 +259,9 @@ export const Folder = v.looseObject({
 	sort_order: v.optional(WholeNum),
 	device_count: v.optional(WholeNum),
 	allowed_users: v.optional(v.array(v.string())),
-	allowed_groups: v.optional(v.array(v.string()))
+	allowed_groups: v.optional(v.array(v.string())),
+	/** The site the folder is pinned to; only on a server that has sites */
+	site_id: v.optional(v.nullable(v.string()))
 });
 export type Folder = v.InferOutput<typeof Folder>;
 

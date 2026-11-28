@@ -92,6 +92,9 @@ var NavSections = []NavSection{
 		navPage("remote", "web client browser remote control sessions", "/remote/sessions", "nav.remote", withPermission("device.connect"), core),
 		navPage("inventory", "hardware software", "/inventory", "nav.inventory", withPermission("device.view")),
 		navPage("network", "ping monitor latency targets", "/network", "nav.network", withPermission("device.view")),
+		// Sites are per organization, so every account that sees devices
+		// reads its organizations' sites (routes/sites)
+		navPage("sites", "sites offices locations relay nodes networks", "/sites", "nav.sites", withPermission("device.view")),
 		navPage("fleet", "fleet bulk tasks workflows compliance", "/fleet", "nav.fleet", withPermission("org.manage_devices")),
 		navPage("cdap", "cdap iot scada sensors gateway", "/cdap", "nav.cdap", withPermission("cdap.view")),
 	}},

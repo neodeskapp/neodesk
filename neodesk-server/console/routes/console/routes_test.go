@@ -404,6 +404,8 @@ var (
 		// shown to other roles than in Node
 		"security-checks": "L494", "billing": "L494", "commercialization:sessions": "L494", "commercialization:packages": "L494",
 		"settings:brand": "L494", "devices-add": "L494", "agents": "L494", "pairing": "L494", "activate-agent": "L494",
+		// Sites and their relay nodes, which Node never had
+		"sites": "sites",
 	}
 	// changedPages stay in the navigation with another address, label,
 	// keywords and tab: the comparison keeps the page and its place and

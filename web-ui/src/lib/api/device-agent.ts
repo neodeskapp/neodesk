@@ -61,7 +61,16 @@ export const ConnectionSession = v.looseObject({
 	peer_id: Text,
 	peer_ip: Text,
 	transport: Text,
-	active: BoolLike
+	active: BoolLike,
+	/** How the session was relayed: { kind: direct|central|lan|node|nodes, nodes?: [{ id, name }] } */
+	relay: v.optional(
+		v.nullable(
+			v.looseObject({
+				kind: Text,
+				nodes: v.optional(v.array(v.looseObject({ id: Text, name: Text })))
+			})
+		)
+	)
 });
 export type ConnectionSession = v.InferOutput<typeof ConnectionSession>;
 

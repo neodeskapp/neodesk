@@ -201,6 +201,10 @@
    "summary": "The setup guide a new install shows its first admin on the overview"
   },
   {
+   "name": "sites",
+   "summary": "Sites with their networks and relay nodes, and pinning devices and folders to a site"
+  },
+  {
    "name": "strategies",
    "summary": "Strategies: settings pushed to desktop clients"
   },
@@ -7076,6 +7080,211 @@
    "examples": [
     "neodesk setup-guide status",
     "neodesk setup-guide status --json"
+   ]
+  },
+  {
+   "name": "sites list",
+   "summary": "List sites with their networks, relay nodes and device counts.",
+   "route": "GET /api/sites",
+   "permission": "device.view",
+   "rows": "data.sites",
+   "columns": [
+    "id",
+    "name",
+    "org_name",
+    "vpn_group",
+    "devices"
+   ],
+   "description": "--json shows the networks and each relay node with its online state, version, addresses, active sessions and traffic."
+  },
+  {
+   "name": "sites create",
+   "summary": "Create a site.",
+   "route": "POST /api/sites",
+   "permission": "server.config or org.edit",
+   "flags": [
+    {
+     "name": "name",
+     "in": "body",
+     "type": "string",
+     "help": "the name, 1 to 100 characters",
+     "required": true
+    },
+    {
+     "name": "org-id",
+     "in": "body",
+     "type": "string",
+     "help": "the organization the site belongs to; leave out for an account in one organization or for no organization",
+     "field": "org_id"
+    },
+    {
+     "name": "vpn-group",
+     "in": "body",
+     "type": "string",
+     "help": "a label shared by sites a VPN connects",
+     "field": "vpn_group"
+    }
+   ]
+  },
+  {
+   "name": "sites update",
+   "summary": "Rename a site or change its VPN group.",
+   "route": "PATCH /api/sites/{id}",
+   "args": [
+    {
+     "name": "id",
+     "help": "The site ID (see sites list)"
+    }
+   ],
+   "permission": "server.config or org.edit",
+   "flags": [
+    {
+     "name": "name",
+     "in": "body",
+     "type": "string",
+     "help": "new name"
+    },
+    {
+     "name": "vpn-group",
+     "in": "body",
+     "type": "string",
+     "help": "new VPN group, empty for none",
+     "field": "vpn_group"
+    }
+   ]
+  },
+  {
+   "name": "sites delete",
+   "summary": "Delete a site with its networks and pins. Its relay nodes are refused from then on.",
+   "route": "DELETE /api/sites/{id}",
+   "args": [
+    {
+     "name": "id",
+     "help": "The site ID (see sites list)"
+    }
+   ],
+   "permission": "server.config or org.edit",
+   "destructive": true
+  },
+  {
+   "name": "sites networks-set",
+   "summary": "Replace the networks of a site.",
+   "route": "PUT /api/sites/{id}/networks",
+   "args": [
+    {
+     "name": "id",
+     "help": "The site ID (see sites list)"
+    }
+   ],
+   "permission": "server.config or org.edit",
+   "description": "Give the list with --data, each network as {\"cidr\":\"10.1.0.0/16\",\"kind\":\"private\"} or kind public. One wrong entry changes nothing; the answer names it.",
+   "examples": [
+    "neodesk sites networks-set <id> --data '{\"networks\":[{\"cidr\":\"10.1.0.0/16\",\"kind\":\"private\"}]}'"
+   ]
+  },
+  {
+   "name": "sites node-token",
+   "summary": "Make an enrollment string that adds one relay node to a site within 24 hours.",
+   "route": "POST /api/sites/{id}/enrollment-tokens",
+   "args": [
+    {
+     "name": "id",
+     "help": "The site ID (see sites list)"
+    }
+   ],
+   "permission": "server.config or org.edit",
+   "secrets": true,
+   "description": "The answer holds the string and the install commands for Linux, Docker and Windows. It is shown once."
+  },
+  {
+   "name": "sites node-rename",
+   "summary": "Rename a relay node.",
+   "route": "PATCH /api/relay-nodes/{id}",
+   "args": [
+    {
+     "name": "id",
+     "help": "The relay node ID (see sites list --json)"
+    }
+   ],
+   "permission": "server.config or org.edit",
+   "flags": [
+    {
+     "name": "name",
+     "in": "body",
+     "type": "string",
+     "help": "new name",
+     "required": true
+    }
+   ]
+  },
+  {
+   "name": "sites node-revoke",
+   "summary": "Revoke a relay node: it gets no more sessions and can't connect again.",
+   "route": "POST /api/relay-nodes/{id}/revoke",
+   "args": [
+    {
+     "name": "id",
+     "help": "The relay node ID (see sites list --json)"
+    }
+   ],
+   "permission": "server.config or org.edit",
+   "destructive": true
+  },
+  {
+   "name": "sites reachability",
+   "summary": "Show which relay nodes reach each other.",
+   "route": "GET /api/sites/reachability",
+   "permission": "device.view",
+   "rows": "data.results",
+   "columns": [
+    "from",
+    "to",
+    "via",
+    "ok",
+    "rtt_ms",
+    "checked_at"
+   ]
+  },
+  {
+   "name": "sites pin-device",
+   "summary": "Pin a device to a site, or take its pin away.",
+   "route": "PATCH /api/devices/{id}/site",
+   "args": [
+    {
+     "name": "id",
+     "help": "The device ID (see devices list)"
+    }
+   ],
+   "permission": "device.edit",
+   "flags": [
+    {
+     "name": "site-id",
+     "in": "body",
+     "type": "string",
+     "help": "the site ID; leave out or empty to take the pin away",
+     "field": "site_id"
+    }
+   ]
+  },
+  {
+   "name": "sites pin-folder",
+   "summary": "Pin a folder's devices to a site, or take the pin away.",
+   "route": "PATCH /api/folders/{id}/site",
+   "args": [
+    {
+     "name": "id",
+     "help": "The folder ID"
+    }
+   ],
+   "permission": "device.edit",
+   "flags": [
+    {
+     "name": "site-id",
+     "in": "body",
+     "type": "string",
+     "help": "the site ID; leave out or empty to take the pin away",
+     "field": "site_id"
+    }
    ]
   },
   {

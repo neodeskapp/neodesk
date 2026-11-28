@@ -8,7 +8,8 @@
 	import type { Folder } from '#lib/api/devices.ts';
 	import { formatBytes, formatDate } from '#lib/i18n/format.ts';
 	import { t, tf } from '#lib/i18n/i18n.svelte.ts';
-	import { can } from '#lib/state/session.svelte.ts';
+	import { placementKey } from '#lib/serverarea/sites.ts';
+	import { can, canWrite } from '#lib/state/session.svelte.ts';
 	import BooleanStatus from '#lib/ui/BooleanStatus.svelte';
 	import Button from '#lib/ui/Button.svelte';
 	import Empty from '#lib/ui/Empty.svelte';
@@ -34,6 +35,7 @@
 	} from '../panel-logic.ts';
 	import ConnectionMode from './ConnectionMode.svelte';
 	import PanelSection from './PanelSection.svelte';
+	import SitePinDialog from './SitePinDialog.svelte';
 
 	interface Props {
 		device: PanelDevice;
@@ -130,9 +132,15 @@
 		{ label: t('devices.remote_enabled'), value: enabledValue }
 	]);
 
+	/* The site, on a server that has sites (the answer then has the member) */
+	const hasSite = $derived(device.site !== undefined);
+	const siteSource = $derived(placementKey(device.site_source));
+	let pinning = $state(false);
+
 	const networkFacts = $derived<Fact[]>([
 		{ label: t('devices.ip_address'), value: ipValue },
 		{ label: t('device_detail.folder'), value: folderName },
+		...(hasSite ? [{ label: t('sites.site'), value: siteValue }] : []),
 		...(groupNames.length ? [{ label: t('device_detail.device_groups'), value: groupsValue }] : [])
 	]);
 
@@ -161,6 +169,15 @@
 {#snippet enabledValue()}<BooleanStatus value={device.enabled !== false} />{/snippet}
 {#snippet ipValue()}<ValueCopy value={device.ip} label={t('devices.ip_address')} />{/snippet}
 {#snippet groupsValue()}<TagSet tags={groupNames} />{/snippet}
+{#snippet siteValue()}
+	<span class="dp-site">
+		<span>{device.site?.name || t('sites.no_site')}</span>
+		{#if siteSource}<span class="dp-muted">({t(siteSource)})</span>{/if}
+		{#if canWrite('device.edit') && !device.soft_deleted}
+			<Button size="sm" onclick={() => (pinning = true)}>{t('sites.pin_change')}…</Button>
+		{/if}
+	</span>
+{/snippet}
 {#snippet firstSeenValue()}<Time value={device.created_at} relative={false} />{/snippet}
 {#snippet lastSeenValue()}
 	{#if device.last_online && formatDate(device.last_online, {}, '')}
@@ -176,6 +193,15 @@
 	/>{/snippet}
 
 {@render children?.()}
+
+{#if pinning}
+	<SitePinDialog
+		deviceId={device.id}
+		deviceName={device.display_name || device.hostname || device.id}
+		pinned={device.site_pin?.id ?? ''}
+		onclose={() => (pinning = false)}
+	/>
+{/if}
 
 {#if device.banned}
 	<Notice tone="danger" title={t('device_detail.device_banned')} role="note">
@@ -269,5 +295,12 @@
 	.dp-meter {
 		flex: 1;
 		max-width: 360px;
+	}
+	/* The site with its Change button after it, wrapping on a narrow panel */
+	.dp-site {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
 	}
 </style>

@@ -8,6 +8,7 @@
 	import type { AvailabilityEvent, ConnectionSession } from '#lib/api/device-agent.ts';
 	import { formatBytes, formatDate, formatDuration, formatNumber, formatPercent } from '#lib/i18n/format.ts';
 	import { i18n, t } from '#lib/i18n/i18n.svelte.ts';
+	import { relayLabel } from '#lib/serverarea/sites.ts';
 	import Button from '#lib/ui/Button.svelte';
 	import Chart from '#lib/ui/Chart.svelte';
 	import Empty from '#lib/ui/Empty.svelte';
@@ -218,6 +219,9 @@
 		},
 		{ id: 'from', label: t('device_detail.sessions_col_from'), cell: sFrom },
 		{ id: 'transport', label: t('device_detail.sessions_col_transport'), cell: sTransport },
+		...((sessions.value ?? []).some((s) => s.relay?.kind)
+			? [{ id: 'relay', label: t('sites.col_relay'), cell: sRelay }]
+			: []),
 		{
 			id: 'duration',
 			label: t('device_detail.sessions_col_duration'),
@@ -257,6 +261,10 @@
 		/>{/if}{/snippet}
 {#snippet sTransport(s: ConnectionSession)}{#if s.transport}{transportLabel(s.transport)}{:else}<Empty
 		/>{/if}{/snippet}
+{#snippet sRelay(s: ConnectionSession)}{@const r = relayLabel(s.relay)}{#if r}{t(
+			r.key,
+			r.params
+		)}{:else}<Empty />{/if}{/snippet}
 {#snippet sDuration(s: ConnectionSession)}{duration(s)}{/snippet}
 
 <PanelSection title={t('device_detail.section_metrics_summary')}>

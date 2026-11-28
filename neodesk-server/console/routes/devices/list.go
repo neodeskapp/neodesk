@@ -10,6 +10,7 @@ import (
 	"github.com/neodeskapp/neodesk/neodesk-server/console/jsbind"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/kit"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/routes/internal/jsreq"
+	"github.com/neodeskapp/neodesk/neodesk-server/console/sitedata"
 )
 
 // sortFields are the fields the list may be ordered by.
@@ -55,6 +56,12 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request) {
 	}
 	for i, device := range devices {
 		device.Set("groups", rowsOf(groups[ids[i]]))
+	}
+	// The site each device is at, on a server that has sites
+	if find := h.d.Sites.Finder(); find != nil {
+		for i, device := range devices {
+			device.Set("site", siteValue(find(ids[i], device.Str("ip"))))
+		}
 	}
 	answer(w, r, http.StatusOK, devicesAnswer{Success: true, Data: deviceList{Devices: devices, Total: len(devices)}})
 }
@@ -240,6 +247,17 @@ func (h *handlers) device(w http.ResponseWriter, r *http.Request) {
 	if groups, err := h.groups.DeviceGroupsForPeer(ctx, id); err == nil && len(groups) > 0 {
 		device.Set("groups", rowsOf(groups))
 	}
+	// Its site and site pin, on a server that has sites
+	if h.d.Sites.Finder() != nil {
+		folder := int64(0)
+		if n := jsreq.Number(device.Get("folder_id")); n > 0 && n <= math.MaxInt32 {
+			folder = int64(n)
+		}
+		p := h.d.Sites.PlacementOf(id, device.Str("ip"), folder)
+		device.Set("site", siteValue(p.Site))
+		device.Set("site_pin", siteValue(p.Pin))
+		device.Set("site_source", p.Source)
+	}
 	answer(w, r, http.StatusOK, withData{Success: true, Data: device})
 }
 
@@ -294,7 +312,59 @@ func (h *handlers) connectionSessions(w http.ResponseWriter, r *http.Request) {
 	if n, ok := jsreq.ParseInt(jsreq.Query(r, "limit"), 10); ok && !math.IsInf(n, 0) {
 		limit = math.Min(math.Max(n, 1), 200)
 	}
-	viaAPI(w, r, h.api.GetPeerConnectionSessions(r.Context(), r.PathValue("id"), limit))
+	result := h.api.GetPeerConnectionSessions(r.Context(), r.PathValue("id"), limit)
+	withRelays(result, h.d.Sites)
+	viaAPI(w, r, result)
+}
+
+// siteValue is a site in a device answer: {id, name}, or null.
+func siteValue(site *sitedata.SiteRef) any {
+	if site == nil {
+		return nil
+	}
+	return goapi.NewObject("id", site.ID, "name", site.Name)
+}
+
+// withRelays gives each session of a connection session answer "relay":
+// how it was relayed, {kind, nodes?}, read from its relay_via ("direct",
+// "central", "lan", or the relay nodes by name). A session the server
+// recorded no relay for gets none.
+func withRelays(result *goapi.Object, data *sitedata.Service) {
+	if result == nil || result.Get("success") == false {
+		return
+	}
+	holder := result
+	if inner, ok := result.Get("data").(*goapi.Object); ok {
+		holder = inner
+	}
+	list, _ := holder.Get("sessions").([]any)
+	var names sitedata.NodeNames
+	for _, item := range list {
+		session, ok := item.(*goapi.Object)
+		if !ok {
+			continue
+		}
+		via := session.Str("relay_via")
+		if via == "" {
+			continue
+		}
+		if names == nil {
+			names = data.NodeNames()
+		}
+		relay := sitedata.RelayOf(via, names)
+		if relay.Kind == "" {
+			continue
+		}
+		value := goapi.NewObject("kind", relay.Kind)
+		if len(relay.Nodes) > 0 {
+			nodes := make([]any, len(relay.Nodes))
+			for i, n := range relay.Nodes {
+				nodes[i] = goapi.NewObject("id", n.ID, "name", n.Name)
+			}
+			value.Set("nodes", nodes)
+		}
+		session.Set("relay", value)
+	}
 }
 
 // refreshTelemetry answers POST /api/devices/{id}/telemetry/refresh: the

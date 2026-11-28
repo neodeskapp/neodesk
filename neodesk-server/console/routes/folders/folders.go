@@ -120,6 +120,17 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request) {
 	if err := h.countAndLists(r, folders); err != nil {
 		h.log.Error("Failed to compute folder device counts:", err.Error())
 	}
+	// The site each folder is pinned to, on a server that has sites
+	if h.d.Sites.Finder() != nil {
+		pins := h.d.Sites.FolderPins()
+		for _, f := range folders {
+			var site any
+			if id := pins[jsreq.String(plainOf(f.Get("id")))]; id != "" {
+				site = id
+			}
+			f.Set("site_id", site)
+		}
+	}
 	answer(w, r, http.StatusOK, goapi.NewObject("success", true, "data", goapi.NewObject("folders", objects(folders), "total", float64(len(folders)))))
 }
 

@@ -327,14 +327,31 @@
 		readJsonPref<string[]>(PREF_COLUMNS, []).filter((x) => typeof x === 'string')
 	);
 
+	/** Columns that start hidden: they show once someone picks them */
+	const OPT_IN = ['site'];
+	const PREF_SHOWN_COLUMNS = 'devices-shown-columns';
+	let shownColumns = $state<string[]>(
+		readJsonPref<string[]>(PREF_SHOWN_COLUMNS, []).filter((x) => typeof x === 'string')
+	);
+
 	function setColumn(id: string, visible: boolean) {
+		if (OPT_IN.includes(id)) {
+			shownColumns = visible
+				? [...shownColumns.filter((c) => c !== id), id]
+				: shownColumns.filter((c) => c !== id);
+			writeJsonPref(PREF_SHOWN_COLUMNS, shownColumns);
+			return;
+		}
 		hiddenColumns = visible
 			? hiddenColumns.filter((c) => c !== id)
 			: [...hiddenColumns.filter((c) => c !== id), id];
 		writeJsonPref(PREF_COLUMNS, hiddenColumns);
 	}
 
-	const shown = (id: string) => !hiddenColumns.includes(id);
+	const shown = (id: string) =>
+		OPT_IN.includes(id) ? shownColumns.includes(id) : !hiddenColumns.includes(id);
+	/** The server has sites: the device answers carry one (null for none) */
+	const hasSites = $derived(devices.some((d) => d.site !== undefined));
 
 	/** Platform shows the full text the client reports, not only the system and its main version */
 	const PREF_OS_DETAILS = 'devices-os-details';
@@ -404,6 +421,19 @@
 			visible: shown('tags'),
 			class: 'col-tags'
 		},
+		...(hasSites
+			? [
+					{
+						id: 'site',
+						label: t('sites.site'),
+						cell: siteCell,
+						sortValue: (d: Device) => d.site?.name.toLowerCase() ?? '',
+						hideable: true,
+						visible: shown('site'),
+						class: 'col-site'
+					}
+				]
+			: []),
 		{
 			id: 'actions',
 			label: t('devices.actions'),
@@ -691,6 +721,7 @@
 	/>{/snippet}
 
 {#snippet tagsCell(d: Device)}<span class="tags-cell"><TagSet tags={d.tags} /></span>{/snippet}
+{#snippet siteCell(d: Device)}{#if d.site}{d.site.name}{:else}<Empty />{/if}{/snippet}
 
 {#snippet actionsCell(d: Device)}<MenuButton
 		kebab
