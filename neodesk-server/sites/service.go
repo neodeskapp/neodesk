@@ -384,11 +384,16 @@ func (s *Service) Route(initiatorID string, initiatorAddr net.IP, targetID strin
 	if live == nil {
 		return NodeRoute{}
 	}
+	// A peer is inside its site when its address is private or one of the
+	// site's public networks (the site's NAT) holds it: it reaches the
+	// node's LAN address. A peer pinned to a site but away from it is not
+	iInside := insideSite(snap, iSite.ID, initiatorAddr)
+	tInside := insideSite(snap, tSite.ID, targetAddr)
 	iPrivate, tPrivate := IsPrivate(initiatorAddr), IsPrivate(targetAddr)
 
 	if iSite.ID == tSite.ID {
 		for _, n := range onlineNodes(snap, live, iSite.ID) {
-			ia, ta := sameSiteAddr(n, iPrivate), sameSiteAddr(n, tPrivate)
+			ia, ta := sameSiteAddr(n, iInside), sameSiteAddr(n, tInside)
 			if ia != "" && ta != "" {
 				return NodeRoute{Kind: Same, A: n, InitiatorAddr: ia, TargetAddr: ta}
 			}
@@ -406,12 +411,12 @@ func (s *Service) Route(initiatorID string, initiatorAddr net.IP, targetID strin
 		via = db.SiteNetworkPrivate
 	}
 	for _, a := range as {
-		ia := sameSiteAddr(a, iPrivate)
+		ia := sameSiteAddr(a, iInside)
 		if ia == "" {
 			continue
 		}
 		for _, b := range bs {
-			ta := sameSiteAddr(b, tPrivate)
+			ta := sameSiteAddr(b, tInside)
 			dial := b.PublicAddr
 			if vpn {
 				dial = b.LANAddr
@@ -426,8 +431,8 @@ func (s *Service) Route(initiatorID string, initiatorAddr net.IP, targetID strin
 	both := append(append([]*db.RelayNode{}, as...), bs...)
 	sortByLoad(both, live)
 	for _, n := range both {
-		ia := reachAddr(n, iSite.ID, iPrivate)
-		ta := reachAddr(n, tSite.ID, tPrivate)
+		ia := reachAddr(n, iSite.ID, iInside, iPrivate)
+		ta := reachAddr(n, tSite.ID, tInside, tPrivate)
 		if ia != "" && ta != "" {
 			return NodeRoute{Kind: Same, A: n, InitiatorAddr: ia, TargetAddr: ta}
 		}
@@ -462,20 +467,40 @@ func sortByLoad(nodes []*db.RelayNode, live NodeLiveness) {
 	})
 }
 
-// sameSiteAddr is the address a peer at the node's site dials.
-func sameSiteAddr(n *db.RelayNode, peerPrivate bool) string {
-	if peerPrivate {
+// sameSiteAddr is the address a peer at the node's site dials: the LAN
+// address from inside the site (its public address when it has no LAN
+// address), the public address from outside.
+func sameSiteAddr(n *db.RelayNode, inside bool) string {
+	if inside && n.LANAddr != "" {
 		return n.LANAddr
 	}
 	return n.PublicAddr
 }
 
+// insideSite reports whether addr is inside site: a private address, or
+// a public one in one of the site's public networks.
+func insideSite(snap *snapshot, siteID string, addr net.IP) bool {
+	if addr == nil {
+		return false
+	}
+	if IsPrivate(addr) {
+		return true
+	}
+	for i := range snap.nets {
+		n := &snap.nets[i]
+		if n.site.ID == siteID && n.kind == db.SiteNetworkPublic && n.net.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
 // reachAddr is the address a peer at site peerSite dials to reach node n:
 // the same-site rule at n's own site, n's public address from another site
-// when the peer's address is public, "" otherwise.
-func reachAddr(n *db.RelayNode, peerSite string, peerPrivate bool) string {
+// when the peer's address is public (it reaches the internet), "" otherwise.
+func reachAddr(n *db.RelayNode, peerSite string, inside, peerPrivate bool) string {
 	if n.SiteID == peerSite {
-		return sameSiteAddr(n, peerPrivate)
+		return sameSiteAddr(n, inside)
 	}
 	if peerPrivate {
 		return ""

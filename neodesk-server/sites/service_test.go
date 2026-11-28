@@ -243,13 +243,26 @@ func TestSiteRouteSameSiteAddressPerPeer(t *testing.T) {
 	s := f.site("org", "office", "", netSpec{"10.0.0.0/8", private}, netSpec{"198.51.100.0/24", public})
 	n := f.node(s.ID, "10.0.0.5:21117", "198.51.100.5:21117")
 	f.device("LAN", "org")
-	f.device("WAN", "org")
-	r := f.svc.Route("LAN", net.ParseIP("10.0.0.10"), "WAN", net.ParseIP("198.51.100.20"))
+	f.device("NAT", "org")
+	f.device("AWAY", "org")
+	if err := f.svc.SetPin(db.SitePinDevice, "AWAY", s.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Behind the site's NAT the central server sees the site's public
+	// address, but the peer is inside and reaches the node's LAN address
+	r := f.svc.Route("LAN", net.ParseIP("10.0.0.10"), "NAT", net.ParseIP("198.51.100.20"))
 	if r.Kind != Same || r.A == nil || r.A.ID != n.ID {
 		t.Fatalf("route %+v; want Same through the site's node", r)
 	}
+	if r.InitiatorAddr != "10.0.0.5:21117" || r.TargetAddr != "10.0.0.5:21117" {
+		t.Errorf("addresses %q, %q; want the LAN address for both peers inside the site", r.InitiatorAddr, r.TargetAddr)
+	}
+
+	// A peer pinned to the site but away from it gets the public address
+	r = f.svc.Route("LAN", net.ParseIP("10.0.0.10"), "AWAY", net.ParseIP("203.0.113.20"))
 	if r.InitiatorAddr != "10.0.0.5:21117" || r.TargetAddr != "198.51.100.5:21117" {
-		t.Errorf("addresses %q, %q; want the LAN address for the private peer, the public one for the other", r.InitiatorAddr, r.TargetAddr)
+		t.Errorf("addresses %q, %q; want the LAN address inside, the public one for the peer away", r.InitiatorAddr, r.TargetAddr)
 	}
 }
 
@@ -278,13 +291,16 @@ func TestSiteRouteSameSiteSkipsNodeWithoutAddress(t *testing.T) {
 	s := f.site("org", "office", "", netSpec{"10.0.0.0/8", private}, netSpec{"198.51.100.0/24", public})
 	lanOnly := f.node(s.ID, "10.0.0.5:21117", "")
 	f.device("LAN", "org")
-	f.device("WAN", "org")
-	if r := f.svc.Route("LAN", net.ParseIP("10.0.0.10"), "WAN", net.ParseIP("198.51.100.20")); r.Kind != None {
-		t.Errorf("only node has no public address for the public peer: %+v; want None", r)
+	f.device("AWAY", "org")
+	if err := f.svc.SetPin(db.SitePinDevice, "AWAY", s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.svc.Route("LAN", net.ParseIP("10.0.0.10"), "AWAY", net.ParseIP("203.0.113.20")); r.Kind != None {
+		t.Errorf("only node has no public address for the peer away: %+v; want None", r)
 	}
 	both := f.node(s.ID, "10.0.0.6:21117", "198.51.100.6:21117")
 	f.live.sessions[both.ID] = 10 // busier, but the only one with both addresses
-	r := f.svc.Route("LAN", net.ParseIP("10.0.0.10"), "WAN", net.ParseIP("198.51.100.20"))
+	r := f.svc.Route("LAN", net.ParseIP("10.0.0.10"), "AWAY", net.ParseIP("203.0.113.20"))
 	if r.Kind != Same || r.A.ID != both.ID {
 		t.Errorf("route %+v; want the node with both addresses, not %s", r, lanOnly.ID)
 	}
@@ -389,8 +405,8 @@ func TestSiteRoutePairUnreachableFallsBack(t *testing.T) {
 	}
 
 	r := f.svc.Route("A", net.ParseIP("198.51.100.10"), "B", net.ParseIP("198.51.100.200"))
-	if r.Kind != Same || r.A.ID != nb.ID || r.InitiatorAddr != "203.0.113.2:21117" || r.TargetAddr != "203.0.113.2:21117" {
-		t.Errorf("public peers, A can't reach B: %+v; want the less loaded node at its public address for both", r)
+	if r.Kind != Same || r.A.ID != nb.ID || r.InitiatorAddr != "203.0.113.2:21117" || r.TargetAddr != "10.2.0.5:21117" {
+		t.Errorf("peers behind their sites' NAT, A can't reach B: %+v; want the less loaded node, public for A and LAN for B inside its site", r)
 	}
 
 	r = f.svc.Route("A", net.ParseIP("198.51.100.10"), "B", net.ParseIP("10.2.0.10"))
