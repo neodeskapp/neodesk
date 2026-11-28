@@ -54,6 +54,7 @@ const CONSOLE: Record<string, string> = {
 	'/(console)/server/config-files': '/server/config-files',
 	'/(console)/server/updates': '/server/updates',
 	'/(console)/settings': '/settings',
+	'/(console)/sites': '/sites',
 	'/(console)/tickets': '/tickets',
 	'/(console)/toolkit': '/toolkit',
 	'/(console)/users': '/users',
