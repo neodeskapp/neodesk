@@ -194,10 +194,9 @@
         "secret": false
        },
        {
-        "files": 0,
+        "files": 20,
         "id": "chat_files",
-        "included": false,
-        "reason": "empty",
+        "included": true,
         "secret": false
        },
        {
