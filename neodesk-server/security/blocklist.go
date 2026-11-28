@@ -44,6 +44,7 @@ type Blocklist struct {
 	networks []*networkEntry        // CIDR network matches
 	filePath string                 // Path to blocklist file (optional)
 	store    Store                  // Keeps the runtime additions (optional)
+	onChange func()                 // hears runtime changes (OnChange)
 }
 
 // Store keeps the entries added at run time (BlockIP, BlockID,
@@ -249,6 +250,7 @@ const RevokedReason = "revoked"
 // BlockIP adds an IP to the blocklist at runtime and to the store. When
 // the store fails, the IP is not blocked.
 func (b *Blocklist) BlockIP(ip, reason string) error {
+	defer b.changed()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	entry := &BlockEntry{
@@ -271,6 +273,7 @@ func (b *Blocklist) BlockIP(ip, reason string) error {
 // BlockID adds a device ID to the blocklist at runtime and to the store.
 // When the store fails, the ID is not blocked.
 func (b *Blocklist) BlockID(id, reason string) error {
+	defer b.changed()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	entry := &BlockEntry{
@@ -294,6 +297,7 @@ func (b *Blocklist) BlockCIDR(cidr, reason string) error {
 		return err
 	}
 
+	defer b.changed()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	entry := &BlockEntry{
@@ -311,6 +315,7 @@ func (b *Blocklist) BlockCIDR(cidr, reason string) error {
 
 // UnblockIP removes an IP from the blocklist.
 func (b *Blocklist) UnblockIP(ip string) bool {
+	defer b.changed()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if e, ok := b.ips[ipKey(ip)]; ok {
@@ -323,6 +328,7 @@ func (b *Blocklist) UnblockIP(ip string) bool {
 
 // UnblockID removes a device ID from the blocklist.
 func (b *Blocklist) UnblockID(id string) bool {
+	defer b.changed()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if _, ok := b.ids[id]; ok {
@@ -335,6 +341,7 @@ func (b *Blocklist) UnblockID(id string) bool {
 
 // UnblockCIDR removes a CIDR from the blocklist.
 func (b *Blocklist) UnblockCIDR(cidr string) bool {
+	defer b.changed()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for i, ne := range b.networks {
@@ -417,4 +424,45 @@ func (b *Blocklist) SaveToFile(path string) error {
 	}
 
 	return w.Flush()
+}
+
+// OnChange sets who hears that an entry was added or removed at run time
+// (the other instances of the installation reload then).
+func (b *Blocklist) OnChange(f func()) {
+	b.mu.Lock()
+	b.onChange = f
+	b.mu.Unlock()
+}
+
+func (b *Blocklist) changed() {
+	b.mu.RLock()
+	f := b.onChange
+	b.mu.RUnlock()
+	if f != nil {
+		f()
+	}
+}
+
+// Reload reads the blocklist again from its file and its store: another
+// instance changed the entries. The new entries replace the old ones at
+// once, so no check runs against a half-loaded list.
+func (b *Blocklist) Reload() error {
+	b.mu.RLock()
+	path, store := b.filePath, b.store
+	b.mu.RUnlock()
+	fresh := NewBlocklist()
+	if path != "" {
+		if err := fresh.LoadFromFile(path); err != nil {
+			return err
+		}
+	}
+	if store != nil {
+		if err := fresh.UseStore(store); err != nil {
+			return err
+		}
+	}
+	b.mu.Lock()
+	b.ips, b.ids, b.networks = fresh.ips, fresh.ids, fresh.networks
+	b.mu.Unlock()
+	return nil
 }

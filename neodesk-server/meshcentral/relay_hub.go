@@ -244,7 +244,7 @@ func (h *relayHub) finish() {
 		recorder.Close()
 	}
 	h.gateway.relayHubs.CompareAndDelete(h.relayID, h)
-	h.gateway.relayMeta.Delete(h.relayID)
+	h.gateway.setRelayMeta(h.relayID, nil)
 	if h.gateway.auditLog != nil {
 		fields := map[string]string{
 			"event": "mesh_session_end",

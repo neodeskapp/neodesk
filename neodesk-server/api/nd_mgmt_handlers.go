@@ -63,28 +63,6 @@ var mgmtHub = &ndMgmtHub{
 	sessions: make(map[string]*ndMgmtSession),
 }
 
-type ndMgmtNonceCache struct {
-	mu    sync.Mutex
-	items map[string]time.Time
-}
-
-var mgmtNonceCache = &ndMgmtNonceCache{items: make(map[string]time.Time)}
-
-func (c *ndMgmtNonceCache) markUsed(key string, now time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for k, exp := range c.items {
-		if now.After(exp) {
-			delete(c.items, k)
-		}
-	}
-	if _, exists := c.items[key]; exists {
-		return true
-	}
-	c.items[key] = now.Add(ndMgmtNonceTTL)
-	return false
-}
-
 func ndMgmtSignaturePayload(deviceID, ts, nonce string) []byte {
 	return fmt.Appendf(nil, "nd-mgmt-v1\n%s\n%s\n%s", deviceID, ts, nonce)
 }
@@ -175,8 +153,7 @@ func (s *Server) verifyNdMgmtRequest(r *http.Request, deviceID string) error {
 		return errors.New("invalid device signature")
 	}
 
-	cacheKey := deviceID + ":" + nonce
-	if mgmtNonceCache.markUsed(cacheKey, now) {
+	if !s.mgmtNonceKeys().use(deviceID+":"+nonce, now) {
 		return errors.New("replayed device signature")
 	}
 

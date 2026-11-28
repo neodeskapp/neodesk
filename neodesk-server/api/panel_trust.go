@@ -33,7 +33,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/auth"
@@ -188,39 +187,10 @@ func parseInt64Strict(s string) (int64, error) {
 	return out, nil
 }
 
-// panelNonceCache remembers nonces for the statement window, so a captured
-// header cannot be replayed while it is still inside its TTL.
-type panelNonceCache struct {
-	mu    sync.Mutex
-	seen  map[string]time.Time
-	lastS time.Time
-}
-
-func newPanelNonceCache() *panelNonceCache {
-	return &panelNonceCache{seen: make(map[string]time.Time)}
-}
-
-// use records a nonce. It returns false when the nonce was already used.
-func (c *panelNonceCache) use(nonce string, now time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.seen == nil {
-		c.seen = make(map[string]time.Time)
-	}
-	if now.Sub(c.lastS) > panelTrustNonceTTL {
-		for key, at := range c.seen {
-			if now.Sub(at) > panelTrustNonceTTL {
-				delete(c.seen, key)
-			}
-		}
-		c.lastS = now
-	}
-	if _, dup := c.seen[nonce]; dup {
-		return false
-	}
-	c.seen[nonce] = now
-	return true
-}
+// newPanelNonces remembers nonces for the statement window, so a captured
+// header cannot be replayed while it is still inside its TTL, on any
+// instance that shares the KV.
+func newPanelNonces() *onceKeys { return newOnceKeys("nonce:panel:", panelTrustNonceTTL) }
 
 // SetPanelTrustSecret enables the bridge. An empty secret leaves it disabled.
 func (s *Server) SetPanelTrustSecret(secret string) {
@@ -315,10 +285,7 @@ func (s *Server) verifyPanelTrust(r *http.Request) (panelClaim, error) {
 	if err != nil {
 		return claim, err
 	}
-	if s.panelNonces == nil {
-		s.panelNonces = newPanelNonceCache()
-	}
-	if !s.panelNonces.use(claim.Nonce, time.Now()) {
+	if !s.panelNonceKeys().use(claim.Nonce, time.Now()) {
 		return claim, errPanelTrustReplay
 	}
 	return claim, nil

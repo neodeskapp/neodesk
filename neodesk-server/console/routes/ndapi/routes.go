@@ -50,7 +50,7 @@ func Register(d *kit.Deps) {
 	h := &handlers{
 		d:       d,
 		regs:    registrations.New(d.Store, d.GoAPI),
-		nonces:  newNonces(),
+		nonces:  newNonces(d.KV),
 		log:     d.Log.Child("BD-API"),
 		now:     time.Now,
 		random:  rand.Reader,

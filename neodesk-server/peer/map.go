@@ -231,6 +231,8 @@ type Map struct {
 	dir *dirState
 	// onMoved hears of peers that moved here from another pod
 	onMoved func(id, from string)
+	// onRemoteRemove asks the pod that holds a peer to remove it
+	onRemoteRemove func(owner, id string)
 
 	// Counters (atomic for lock-free reads from metrics)
 	totalRegistrations atomic.Int64
@@ -683,6 +685,7 @@ func (m *Map) Remove(id string) *Entry {
 	defer m.mu.Unlock()
 	e, ok := m.entries[id]
 	if !ok {
+		m.removeRemoteLocked(id)
 		return nil
 	}
 	e.CloseConnections()

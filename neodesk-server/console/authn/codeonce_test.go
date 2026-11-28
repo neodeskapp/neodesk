@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/auth"
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/store"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/store/storetest"
 )
@@ -107,6 +108,57 @@ func TestRecoveryCodeIsWrittenWithACondition(t *testing.T) {
 		wg.Wait()
 		if used != 1 {
 			t.Errorf("the code was used %d times", used)
+		}
+	})
+}
+
+// Two instances that share one KV: a code that signed an account in on
+// one is refused on the other, also a code of the step before.
+func TestTOTPCodeWorksOnceOnAllInstances(t *testing.T) {
+	storetest.EachMigrated(t, func(t *testing.T, db *store.DB) {
+		ctx := context.Background()
+		now := time.UnixMilli(1794287700123)
+		kv := cluster.NewMemKV()
+		shared := func(o *Options) {
+			o.Now = func() time.Time { return now }
+			o.KV = kv
+		}
+		a, _, _ := testService(t, db, shared)
+		b, _, _ := testService(t, db, shared)
+		const secret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+		alice := addUser(t, a, "alice", "pw", "admin", "local")
+		bob := addUser(t, a, "bob", "pw", "admin", "local")
+		mustExec(t, db, `UPDATE users SET totp_secret = ?, totp_enabled = `+db.Pick("1", "TRUE"), secret)
+		verify := func(s *Service, id int64) bool {
+			t.Helper()
+			c, err := auth.ComputeTOTP(secret, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok, err := s.VerifyTOTPCode(ctx, id, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return ok
+		}
+		if !verify(a, alice) {
+			t.Fatal("the first use of the code was refused")
+		}
+		if verify(b, alice) {
+			t.Error("a code used on one instance worked on the other")
+		}
+		now = now.Add(30 * time.Second)
+		if !verify(b, alice) {
+			t.Fatal("the next step's code was refused")
+		}
+		if !verify(b, bob) {
+			t.Fatal("another account's code was refused")
+		}
+		// An instance whose clock is a step behind: bob's code of that
+		// step was never used, but a later one was
+		now = now.Add(-30 * time.Second)
+		if verify(a, bob) {
+			t.Error("the code of an earlier step worked after a later one on another instance")
 		}
 	})
 }

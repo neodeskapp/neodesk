@@ -36,10 +36,16 @@ type Gateway struct {
 	assets    *CoreAssets
 	webHash   []byte // SHA-384 of TLS web cert (48 bytes)
 
-	agents    sync.Map // peerID -> *AgentConn
-	relays    sync.Map // relayID -> *relaySession (non-KVM)
-	relayHubs sync.Map // relayID -> *relayHub (KVM multiplex)
-	relayMeta sync.Map // relayID -> *relayMeta
+	agents sync.Map // peerID -> *AgentConn
+	// presence tells the other instances which agents this one holds;
+	// nil when the server runs alone.
+	presence Presence
+	// relayRouter passes a relay socket to the instance that set the relay
+	// up and reports whether it did (SetRelayRouter).
+	relayRouter func(w http.ResponseWriter, r *http.Request, relayID string) bool
+	relays      sync.Map // relayID -> *relaySession (non-KVM)
+	relayHubs   sync.Map // relayID -> *relayHub (KVM multiplex)
+	relayMeta   sync.Map // relayID -> *relayMeta
 
 	// relayWait is how long a relay waits for its peers (relayWaitDefault
 	// when 0).
@@ -211,3 +217,21 @@ func (g *Gateway) allowIP(w http.ResponseWriter, r *http.Request) bool {
 func clientIP(r *http.Request, cfg *config.Config) string {
 	return cfg.ClientIP(r)
 }
+
+// Presence records which instance of the installation holds a device's
+// socket (cluster.Devices). Release reports whether the device is still
+// this instance's to mark offline: false when it has reconnected to
+// another instance meanwhile.
+type Presence interface {
+	Hold(kind, id string)
+	Release(kind, id string) bool
+}
+
+// SetRelayRouter sets who passes a relay socket on to the instance that set
+// the relay up (cluster mode).
+func (g *Gateway) SetRelayRouter(route func(w http.ResponseWriter, r *http.Request, relayID string) bool) {
+	g.relayRouter = route
+}
+
+// SetPresence shares which agents this instance holds (cluster mode).
+func (g *Gateway) SetPresence(p Presence) { g.presence = p }

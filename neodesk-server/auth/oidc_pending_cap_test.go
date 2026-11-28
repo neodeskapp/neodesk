@@ -29,18 +29,11 @@ func TestOIDCPendingSignInsAreCapped(t *testing.T) {
 	if _, _, err := p.BuildClientAuthURL("DEV1", "uuid-1", ClientDeviceInfo{}); err == nil {
 		t.Error("client start beyond the cap was accepted")
 	}
-	p.mu.Lock()
-	if len(p.states) > maxOIDCPending || len(p.clientPending) > maxOIDCPending {
-		t.Errorf("%d states and %d client entries, cap %d", len(p.states), len(p.clientPending), maxOIDCPending)
+	if p.stateCap.Len() > maxOIDCPending || p.clientCap.Len() > maxOIDCPending {
+		t.Errorf("%d states and %d client entries, cap %d", p.stateCap.Len(), p.clientCap.Len(), maxOIDCPending)
 	}
-	old := time.Now().Add(-time.Hour)
-	for _, s := range p.states {
-		s.CreatedAt = old
-	}
-	for _, c := range p.clientPending {
-		c.CreatedAt = old
-	}
-	p.mu.Unlock()
+	later := time.Now().Add(time.Hour)
+	p.now = func() time.Time { return later }
 	if _, _, err := p.BuildClientAuthURL("DEV1", "uuid-1", ClientDeviceInfo{}); err != nil {
 		t.Errorf("start after the entries expired: %v", err)
 	}
@@ -69,9 +62,7 @@ func TestOIDCStartRefusesOverlongFields(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.states) != 0 || len(p.clientPending) != 0 {
-		t.Errorf("refused starts stored %d states and %d client entries", len(p.states), len(p.clientPending))
+	if p.stateCap.Len() != 0 || p.clientCap.Len() != 0 {
+		t.Errorf("refused starts stored %d states and %d client entries", p.stateCap.Len(), p.clientCap.Len())
 	}
 }

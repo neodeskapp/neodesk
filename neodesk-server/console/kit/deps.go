@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
+
 	"github.com/neodeskapp/neodesk/neodesk-server/console/access"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/admintoken"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/alerts"
@@ -141,6 +143,12 @@ type Deps struct {
 	// Clustered is set when the console shares its installation with
 	// other instances (VALKEY_URL).
 	Clustered bool
+	// KV is the store of short-lived values the instances of the
+	// installation share: the route groups keep their pending second
+	// steps and used nonces there, so a flow can finish on another
+	// instance. nil when the console runs alone: each group then keeps
+	// its own in memory.
+	KV cluster.KV
 	// Sockets is the registry of the console's websockets: a service adds
 	// a socket path with d.Sockets.Handle (package console/ws). An upgrade
 	// to a path nobody registered passes the request pipeline like a plain

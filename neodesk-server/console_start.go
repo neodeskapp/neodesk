@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/api"
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/config"
 	"github.com/neodeskapp/neodesk/neodesk-server/console"
 	consoleconfig "github.com/neodeskapp/neodesk/neodesk-server/console/config"
@@ -66,6 +67,10 @@ func startConsole(ctx context.Context, cfg *config.Config, database db.Database,
 		_ = sdb.Close()
 		return nil, fmt.Errorf("console schema: %w", err)
 	}
+	var sharedKV cluster.KV
+	if rt != nil && rt.kv != nil {
+		sharedKV = rt.kv
+	}
 	srv, err := console.New(ctx, console.Options{
 		Config:      ccfg,
 		Store:       sdb,
@@ -81,6 +86,8 @@ func startConsole(ctx context.Context, cfg *config.Config, database db.Database,
 		PublicRelay: cfg.SetPublicRelayServer,
 		Leases:      rt.consoleLeases(),
 		Clustered:   rt != nil && rt.cfg.Enabled(),
+		Settings:    rt.settingsBus(),
+		KV:          sharedKV,
 	})
 	if err != nil {
 		_ = sdb.Close()

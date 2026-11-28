@@ -1,18 +1,19 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/auth"
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/crypto/devicevault"
 	"github.com/neodeskapp/neodesk/neodesk-server/db"
 	"github.com/neodeskapp/neodesk/neodesk-server/relay"
@@ -65,29 +66,26 @@ func (s *Server) InitDeviceVault(dir string) error {
 
 // signinUses remembers the sessions that used a saved sign-in: one use per
 // session, also after a failed attempt, so a wrong password can't lock
-// the account by retries.
+// the account by retries. The uses are in a KV (SetSharedKV), so a session
+// uses its sign-in once on all instances. The zero value keeps them in
+// memory under the prefix "signin:".
 type signinUses struct {
-	mu   sync.Mutex
-	used map[string]time.Time
+	kvHolder
+	prefix string
 }
 
 // claim reports whether session had not used a sign-in yet, and marks it.
 func (u *signinUses) claim(session string, now time.Time) bool {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if u.used == nil {
-		u.used = map[string]time.Time{}
+	prefix := u.prefix
+	if prefix == "" {
+		prefix = "signin:"
 	}
-	for k, at := range u.used {
-		if now.Sub(at) > signinUseTTL {
-			delete(u.used, k)
-		}
-	}
-	if _, ok := u.used[session]; ok {
+	ok, err := cluster.UseOnce(context.Background(), u.kv(), prefix+session, now, signinUseTTL)
+	if err != nil {
+		log.Printf("[signin] note the use of a session: %v", err)
 		return false
 	}
-	u.used[session] = now
-	return true
+	return ok
 }
 
 func (s *Server) signinRoutes(mux *http.ServeMux) {

@@ -35,6 +35,15 @@ func (s *Server) startPeerIDChangeListener() {
 				if oldID == "" || newID == "" || oldID == newID {
 					continue
 				}
+				if ev.Remote {
+					// Another pod changed the id; the pod that holds the
+					// peer moves its entry, and the publishing pod routes
+					// the notice to it
+					if s.peers.GetLocal(oldID) != nil {
+						s.peers.Rename(oldID, newID)
+					}
+					continue
+				}
 				s.notifyPeerIDChange(oldID, newID)
 			}
 		}

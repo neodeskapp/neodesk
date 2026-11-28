@@ -23,6 +23,7 @@ import (
 	"github.com/neodeskapp/neodesk/neodesk-server/auth"
 	"github.com/neodeskapp/neodesk/neodesk-server/billing"
 	"github.com/neodeskapp/neodesk/neodesk-server/cdap"
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/config"
 	"github.com/neodeskapp/neodesk/neodesk-server/crypto"
 	"github.com/neodeskapp/neodesk/neodesk-server/crypto/devicevault"
@@ -87,6 +88,12 @@ type Server struct {
 	// readiness says whether the pod takes traffic (SetReadiness); nil
 	// means always
 	readiness atomic.Pointer[func() (bool, string)]
+	// deviceRouting passes device requests to the instance that holds the
+	// device (SetDeviceRouting); nil keeps them here.
+	deviceRouting DeviceRouting
+	// settingsBus carries which settings this instance changed to the
+	// others (SetSettingsBus); nil alone.
+	settingsBus *eventsModule.Bus
 	// deviceChat is the console's handler of a computer's support chat
 	// (device_chat.go, L526)
 	deviceChat deviceChatHandler
@@ -145,9 +152,18 @@ type Server struct {
 	clientTFASessions *tfaSessionStore
 	panelStore        db.PanelSyncStore // device groups, folders, ACL (PostgreSQL or legacy auth.db)
 	panelTrustSecret  []byte            // HMAC key for panel-originated requests (nil = bridge off)
-	panelNonces       *panelNonceCache  // replay window for verified panel statements
-	timeSync          *timesync.Service
-	billing           *billing.Service
+	panelNonces       *onceKeys         // replay window for verified panel statements
+	// mgmtNonces and enrollmentNonces are the replay windows of the
+	// signed management requests and of the enrollment proofs
+	mgmtNonces       *onceKeys
+	enrollmentNonces *onceKeys
+	// nonceInit makes the nonce stores of a Server built without New
+	nonceInit sync.Once
+	// sharedKV is the KV of SetSharedKV, nil while each store keeps its
+	// values in memory
+	sharedKV cluster.KV
+	timeSync *timesync.Service
+	billing  *billing.Service
 	// peerVault is the old key of organizations' device passwords, derived
 	// from ORG_PEER_VAULT_KEY or the JWT secret: it only opens rows sealed
 	// before the key file (key id v1), which MigrateOrgPeerCredentials
@@ -220,7 +236,11 @@ func New(cfg *config.Config, database db.Database, peerMap *peer.Map, relaySrv *
 		oidcStartLimiter:  ratelimit.NewIPLimiter(20, 1*time.Minute, 5*time.Minute),
 		clientTFASessions: newTFASessionStore(),
 		secureClientKeys:  make(map[string][32]byte),
-		panelNonces:       newPanelNonceCache(),
+		panelNonces:       newPanelNonces(),
+		mgmtNonces:        newMgmtNonces(),
+		enrollmentNonces:  newEnrollmentNonces(),
+		signinUses:        signinUses{prefix: "signin:use:"},
+		callerUses:        signinUses{prefix: "signin:caller:"},
 		now:               time.Now,
 	}
 	s.fleet.init()
@@ -410,6 +430,9 @@ func (s *Server) InitLDAP() {
 func (s *Server) InitOIDC() {
 	cfg := s.loadOIDCConfigFromDB()
 	s.oidcProvider = auth.NewOIDCProvider(cfg)
+	if s.sharedKV != nil {
+		s.oidcProvider.SetKV(s.sharedKV)
+	}
 	if cfg.Enabled {
 		log.Printf("[OIDC] Provider initialized (issuer=%s, client_id=%s)", cfg.IssuerURL, cfg.ClientID)
 	}
@@ -549,9 +572,9 @@ func (s *Server) routes() *http.ServeMux {
 
 	// Config (server.config permission)
 	mux.HandleFunc("GET /api/config/{key}", s.requirePermission(auth.PermServerConfig, s.handleGetConfig))
-	mux.HandleFunc("PUT /api/config/{key}", s.requirePermission(auth.PermServerConfig, s.handleSetConfig))
+	mux.HandleFunc("PUT /api/config/{key}", s.broadcasts(eventsModule.SettingsConfig, s.requirePermission(auth.PermServerConfig, s.handleSetConfig)))
 	mux.HandleFunc("GET /api/connection/config", s.requirePermission(auth.PermServerConfig, s.handleGetConnectionConfig))
-	mux.HandleFunc("PUT /api/connection/config", s.requirePermission(auth.PermServerConfig, s.handleSetConnectionConfig))
+	mux.HandleFunc("PUT /api/connection/config", s.broadcasts(eventsModule.SettingsConfig, s.requirePermission(auth.PermServerConfig, s.handleSetConnectionConfig)))
 
 	// Auth (public — no auth required, handled by middleware exclusion)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
@@ -661,7 +684,7 @@ func (s *Server) routes() *http.ServeMux {
 
 	// Enrollment mode management (Dual Key System - admin only)
 	mux.HandleFunc("GET /api/enrollment/mode", s.requireRole(auth.RoleAdmin, s.handleGetEnrollmentMode))
-	mux.HandleFunc("PUT /api/enrollment/mode", s.requireRole(auth.RoleAdmin, s.handleSetEnrollmentMode))
+	mux.HandleFunc("PUT /api/enrollment/mode", s.broadcasts(eventsModule.SettingsConfig, s.requireRole(auth.RoleAdmin, s.handleSetEnrollmentMode)))
 
 	// Enrollment — device self-registration (public, no auth, rate-limited via M-07)
 	mux.HandleFunc("POST /api/devices/register", s.rateLimitPublic(s.enrollmentLimiter, s.handleDeviceRegister))
@@ -693,7 +716,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/timesync/status", s.requirePermission(auth.PermBillingView, s.handleTimeSyncStatus))
 	mux.HandleFunc("POST /api/timesync/check", s.requirePermission(auth.PermServerConfig, s.handleTimeSyncCheck))
 	mux.HandleFunc("GET /api/timesync/config", s.requirePermission(auth.PermServerConfig, s.handleGetTimeSyncConfig))
-	mux.HandleFunc("PUT /api/timesync/config", s.requirePermission(auth.PermServerConfig, s.handleSetTimeSyncConfig))
+	mux.HandleFunc("PUT /api/timesync/config", s.broadcasts(eventsModule.SettingsConfig, s.requirePermission(auth.PermServerConfig, s.handleSetTimeSyncConfig)))
 	mux.HandleFunc("GET /api/billing/check", s.requirePermission(auth.PermDeviceConnect, s.handleBillingConnectionCheck))
 	mux.HandleFunc("GET /api/billing/packages", s.requirePermission(auth.PermBillingView, s.handleListBillingPackages))
 	mux.HandleFunc("GET /api/billing/packages/{id}/preview", s.requirePermission(auth.PermBillingView, s.handleBillingPackagePreview))
@@ -724,13 +747,13 @@ func (s *Server) routes() *http.ServeMux {
 
 	// LDAP configuration (server.config permission)
 	mux.HandleFunc("GET /api/auth/ldap/config", s.requirePermission(auth.PermServerConfig, s.handleGetLDAPConfig))
-	mux.HandleFunc("PUT /api/auth/ldap/config", s.requirePermission(auth.PermServerConfig, s.handleSaveLDAPConfig))
+	mux.HandleFunc("PUT /api/auth/ldap/config", s.broadcasts(eventsModule.SettingsLDAP, s.requirePermission(auth.PermServerConfig, s.handleSaveLDAPConfig)))
 	mux.HandleFunc("POST /api/auth/ldap/test", s.requirePermission(auth.PermServerConfig, s.handleTestLDAPConnection))
 	mux.HandleFunc("POST /api/auth/ldap/verify", s.requireConsoleCaller(s.handleLDAPVerifyCredentials))
 
 	// OIDC/OAuth2 configuration (server.config permission)
 	mux.HandleFunc("GET /api/auth/oidc/config", s.requirePermission(auth.PermServerConfig, s.handleGetOIDCConfig))
-	mux.HandleFunc("PUT /api/auth/oidc/config", s.requirePermission(auth.PermServerConfig, s.handleSaveOIDCConfig))
+	mux.HandleFunc("PUT /api/auth/oidc/config", s.broadcasts(eventsModule.SettingsOIDC, s.requirePermission(auth.PermServerConfig, s.handleSaveOIDCConfig)))
 	mux.HandleFunc("POST /api/auth/oidc/test", s.requirePermission(auth.PermServerConfig, s.handleTestOIDCDiscovery))
 	// OIDC public endpoints (no auth — used by login page and IdP callback)
 	mux.HandleFunc("GET /api/auth/oidc/status", s.handleOIDCLoginStatus)
@@ -746,13 +769,13 @@ func (s *Server) routes() *http.ServeMux {
 
 	// Branding (GET is public for desktop clients, POST is admin)
 	mux.HandleFunc("GET /api/branding", s.rateLimitPublic(s.brandingLimiter, s.handleGetBranding))
-	mux.HandleFunc("POST /api/branding", s.requireRole(auth.RoleAdmin, s.handleSaveBranding))
+	mux.HandleFunc("POST /api/branding", s.broadcasts(eventsModule.SettingsBranding, s.requireRole(auth.RoleAdmin, s.handleSaveBranding)))
 
 	// Short-code pairing (host + 6 characters).
 	// Redeem/preview are public because the client has no credentials yet; they are
 	// rate-limited and a valid code is required. Minting, listing and revoking ask enrollment.approve.
 	mux.HandleFunc("POST /api/pairing/redeem", s.rateLimitPublic(s.pairingLimiter, s.handlePairingRedeem))
-	mux.HandleFunc("POST /api/pairing/config", s.rateLimitPublic(s.pairingLimiter, s.handlePairingConfigPreview))
+	mux.HandleFunc("POST /api/pairing/config", s.broadcasts(eventsModule.SettingsConfig, s.rateLimitPublic(s.pairingLimiter, s.handlePairingConfigPreview)))
 	mux.HandleFunc("POST /api/pairing/codes", s.requirePermission(auth.PermEnrollmentApprove, s.handleCreatePairingCode))
 	mux.HandleFunc("GET /api/pairing/codes", s.requirePermission(auth.PermEnrollmentApprove, s.handleListPairingCodes))
 	mux.HandleFunc("DELETE /api/pairing/codes/{id}", s.requirePermission(auth.PermEnrollmentApprove, s.handleDeletePairingCode))
@@ -769,10 +792,10 @@ func (s *Server) routes() *http.ServeMux {
 	// CDAP device management (requires CDAP gateway to be enabled)
 	mux.HandleFunc("GET /api/cdap/status", s.requirePermission(auth.PermCDAPView, s.handleCDAPStatus))
 	mux.HandleFunc("GET /api/cdap/devices", s.requirePermission(auth.PermCDAPView, s.handleCDAPListDevices))
-	mux.HandleFunc("GET /api/cdap/devices/{id}", s.requirePermission(auth.PermCDAPView, s.scopedDevice(s.handleCDAPDeviceInfo)))
-	mux.HandleFunc("GET /api/cdap/devices/{id}/manifest", s.requirePermission(auth.PermCDAPView, s.scopedDevice(s.handleCDAPDeviceManifest)))
-	mux.HandleFunc("GET /api/cdap/devices/{id}/state", s.requirePermission(auth.PermCDAPView, s.scopedDevice(s.handleCDAPDeviceState)))
-	mux.HandleFunc("POST /api/cdap/devices/{id}/command", s.requirePermission(auth.PermCDAPCommand, s.scopedDevice(s.handleCDAPSendCommand)))
+	mux.HandleFunc("GET /api/cdap/devices/{id}", s.requirePermission(auth.PermCDAPView, s.scopedDevice(s.atDevice(s.handleCDAPDeviceInfo, "cdap"))))
+	mux.HandleFunc("GET /api/cdap/devices/{id}/manifest", s.requirePermission(auth.PermCDAPView, s.scopedDevice(s.atDevice(s.handleCDAPDeviceManifest, "cdap"))))
+	mux.HandleFunc("GET /api/cdap/devices/{id}/state", s.requirePermission(auth.PermCDAPView, s.scopedDevice(s.atDevice(s.handleCDAPDeviceState, "cdap"))))
+	mux.HandleFunc("POST /api/cdap/devices/{id}/command", s.requirePermission(auth.PermCDAPCommand, s.scopedDevice(s.atDevice(s.handleCDAPSendCommand, "cdap"))))
 	mux.HandleFunc("GET /api/cdap/alerts", s.requirePermission(auth.PermCDAPView, s.handleCDAPAlerts))
 
 	// CDAP auth delegation (admin only)
@@ -781,19 +804,19 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/cdap/delegations", s.requireRole(auth.RoleAdmin, s.handleCDAPDelegateList))
 
 	// CDAP terminal WebSocket (admin only, upgraded inside handler)
-	mux.HandleFunc("GET /api/cdap/devices/{id}/terminal", s.requireRole(auth.RoleAdmin, s.scopedDevice(s.handleCDAPTerminal)))
+	mux.HandleFunc("GET /api/cdap/devices/{id}/terminal", s.requireRole(auth.RoleAdmin, s.scopedDevice(s.atDevice(s.handleCDAPTerminal, "cdap"))))
 
 	// CDAP remote desktop WebSocket (admin only)
-	mux.HandleFunc("GET /api/cdap/devices/{id}/desktop", s.requireRole(auth.RoleAdmin, s.scopedDevice(s.handleCDAPDesktop)))
+	mux.HandleFunc("GET /api/cdap/devices/{id}/desktop", s.requireRole(auth.RoleAdmin, s.scopedDevice(s.atDevice(s.handleCDAPDesktop, "cdap"))))
 
 	// CDAP video stream WebSocket (device.connect)
-	mux.HandleFunc("GET /api/cdap/devices/{id}/video", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.handleCDAPVideo)))
+	mux.HandleFunc("GET /api/cdap/devices/{id}/video", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.atDevice(s.handleCDAPVideo, "cdap"))))
 
 	// CDAP file browser WebSocket (admin only)
-	mux.HandleFunc("GET /api/cdap/devices/{id}/files", s.requireRole(auth.RoleAdmin, s.scopedDevice(s.handleCDAPFileBrowser)))
+	mux.HandleFunc("GET /api/cdap/devices/{id}/files", s.requireRole(auth.RoleAdmin, s.scopedDevice(s.atDevice(s.handleCDAPFileBrowser, "cdap"))))
 
 	// CDAP audio stream WebSocket (device.connect)
-	mux.HandleFunc("GET /api/cdap/devices/{id}/audio", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.handleCDAPAudio)))
+	mux.HandleFunc("GET /api/cdap/devices/{id}/audio", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.atDevice(s.handleCDAPAudio, "cdap"))))
 
 	// MeshCentral compatibility REST
 	mux.HandleFunc("GET /api/mesh/server-id", s.requirePermission(auth.PermServerConfig, s.handleMeshServerID))
@@ -801,10 +824,10 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/mesh/groups", s.requirePermission(auth.PermServerConfig, s.handleMeshGroupsList))
 	mux.HandleFunc("POST /api/mesh/groups", s.requirePermission(auth.PermServerConfig, s.handleMeshGroupsSave))
 	mux.HandleFunc("GET /api/mesh/download.msh", s.requirePermission(auth.PermServerConfig, s.handleMeshDownloadMSH))
-	mux.HandleFunc("POST /api/mesh/devices/{id}/desktop", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.handleMeshDesktopTunnel)))
-	mux.HandleFunc("POST /api/mesh/devices/{id}/terminal", s.requirePermission(auth.PermMeshTerminal, s.scopedDevice(s.handleMeshTerminalTunnel)))
-	mux.HandleFunc("POST /api/mesh/devices/{id}/files", s.requirePermission(auth.PermMeshFiles, s.scopedDevice(s.handleMeshFilesTunnel)))
-	mux.HandleFunc("POST /api/mesh/devices/{id}/share", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.handleMeshShareCreate)))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/desktop", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.atDevice(s.handleMeshDesktopTunnel, "mesh"))))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/terminal", s.requirePermission(auth.PermMeshTerminal, s.scopedDevice(s.atDevice(s.handleMeshTerminalTunnel, "mesh"))))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/files", s.requirePermission(auth.PermMeshFiles, s.scopedDevice(s.atDevice(s.handleMeshFilesTunnel, "mesh"))))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/share", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.atDevice(s.handleMeshShareCreate, "mesh"))))
 	mux.HandleFunc("GET /api/mesh/share/validate", s.handleMeshShareValidate)
 
 	// Guest Access Links (temporary RdClient allowlist links)
@@ -815,10 +838,10 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/guest/access-links/consume", s.requirePermission(auth.PermGuestCreate, s.handleGuestAccessConsume))
 	mux.HandleFunc("POST /api/guest/access-links/events", s.requirePermission(auth.PermGuestCreate, s.handleGuestAccessEvent))
 	mux.HandleFunc("GET /api/guest/access-links/peers", s.handleGuestAccessPeers)
-	mux.HandleFunc("POST /api/mesh/devices/{id}/tcp", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.handleMeshTcpRelay)))
-	mux.HandleFunc("POST /api/mesh/devices/{id}/udp", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.handleMeshUdpRelay)))
-	mux.HandleFunc("POST /api/mesh/devices/{id}/power", s.requirePermission(auth.PermMeshPower, s.scopedDevice(s.handleMeshPower)))
-	mux.HandleFunc("POST /api/mesh/devices/{id}/group", s.requirePermission(auth.PermServerConfig, s.scopedDevice(s.handleMeshDeviceGroup)))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/tcp", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.atDevice(s.handleMeshTcpRelay, "mesh"))))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/udp", s.requirePermission(auth.PermDeviceConnect, s.scopedDevice(s.atDevice(s.handleMeshUdpRelay, "mesh"))))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/power", s.requirePermission(auth.PermMeshPower, s.scopedDevice(s.atDevice(s.handleMeshPower, "mesh"))))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/group", s.requirePermission(auth.PermServerConfig, s.scopedDevice(s.atDevice(s.handleMeshDeviceGroup, "mesh"))))
 	mux.HandleFunc("GET /api/mesh/recordings", s.requirePermission(auth.PermDeviceView, s.handleMeshRecordingsList))
 	mux.HandleFunc("GET /api/mesh/recordings/{id}", s.requirePermission(auth.PermDeviceConnect, s.handleMeshRecordingDownload))
 	mux.HandleFunc("GET /api/session/recordings", s.requirePermission(auth.PermDeviceView, s.handleSessionRecordingsList))
@@ -826,8 +849,8 @@ func (s *Server) routes() *http.ServeMux {
 	// exec routes ask the terminal permission of the transport: the mesh
 	// route mesh.terminal, the unified route the one of the transport the
 	// device is connected over (handleUnifiedPeerExec).
-	mux.HandleFunc("POST /api/mesh/devices/{id}/exec", s.requirePermission(auth.PermMeshTerminal, s.scopedDevice(s.handleMeshExec)))
-	mux.HandleFunc("POST /api/peers/{id}/exec", s.requireAnyPermission([]string{auth.PermMeshTerminal, auth.PermCDAPTerminal}, s.scopedDevice(s.handleUnifiedPeerExec)))
+	mux.HandleFunc("POST /api/mesh/devices/{id}/exec", s.requirePermission(auth.PermMeshTerminal, s.scopedDevice(s.atDevice(s.handleMeshExec, "mesh"))))
+	mux.HandleFunc("POST /api/peers/{id}/exec", s.requireAnyPermission([]string{auth.PermMeshTerminal, auth.PermCDAPTerminal}, s.scopedDevice(s.atDevice(s.handleUnifiedPeerExec, "mesh", "cdap"))))
 
 	if s.meshGw != nil {
 		s.meshGw.RegisterRoutes(mux)
@@ -1272,12 +1295,12 @@ func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// CDAP overlay: device connected via CDAP gateway is online
-		cdapConnected := s.cdapGw != nil && s.cdapGw.IsConnected(p.ID)
+		cdapConnected := s.deviceConnectedAnywhere(r.Context(), "cdap", p.ID)
 		if cdapConnected && !liveOnline {
 			liveOnline = true
 			liveStatus = peer.StatusOnline
 		}
-		meshConnected := s.meshGw != nil && s.meshGw.IsConnected(p.ID)
+		meshConnected := s.deviceConnectedAnywhere(r.Context(), "mesh", p.ID)
 		if meshConnected && !liveOnline {
 			liveOnline = true
 			liveStatus = peer.StatusOnline
@@ -1399,12 +1422,12 @@ func (s *Server) handleGetPeer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// CDAP overlay
-	cdapConnected := s.cdapGw != nil && s.cdapGw.IsConnected(p.ID)
+	cdapConnected := s.deviceConnectedAnywhere(r.Context(), "cdap", p.ID)
 	if cdapConnected && !liveOnline {
 		liveOnline = true
 		liveStatus = peer.StatusOnline
 	}
-	meshConnected := s.meshGw != nil && s.meshGw.IsConnected(p.ID)
+	meshConnected := s.deviceConnectedAnywhere(r.Context(), "mesh", p.ID)
 	if meshConnected && !liveOnline {
 		liveOnline = true
 		liveStatus = peer.StatusOnline
@@ -1614,7 +1637,7 @@ func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) {
 
 	// CDAP revocation: send revoke message and disconnect CDAP device.
 	if revoke && s.cdapGw != nil {
-		if err := s.cdapGw.SendRevoke(r.Context(), id, "revoked via panel"); err != nil {
+		if err := s.cdapRevoke(r.Context(), id, "revoked via panel"); err != nil {
 			// Not an error — device may not be CDAP-connected
 			_ = err
 		}
@@ -1641,7 +1664,7 @@ func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if revoke && s.cdapGw != nil {
-				s.cdapGw.SendRevoke(r.Context(), lid, "revoked via cascade")
+				s.cdapRevoke(r.Context(), lid, "revoked via cascade")
 			}
 			cascadedIDs = append(cascadedIDs, lid)
 		}

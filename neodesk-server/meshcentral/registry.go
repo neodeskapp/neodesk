@@ -46,6 +46,9 @@ func (g *Gateway) registerAgent(ac *AgentConn) (string, error) {
 		}
 	}
 	g.agents.Store(peerID, ac)
+	if g.presence != nil {
+		g.presence.Hold("mesh", peerID)
+	}
 
 	if g.auditLog != nil {
 		g.auditLog.Log(audit.ActionPeerUpdated, "mesh", peerID, map[string]string{
@@ -278,7 +281,7 @@ func (g *Gateway) createRelayTunnel(peerID, userID, relayBase string, protocol i
 		_, session := g.relays.Load(relayID)
 		_, hub := g.relayHubs.Load(relayID)
 		if !session && !hub {
-			g.relayMeta.Delete(relayID)
+			g.setRelayMeta(relayID, nil)
 		}
 	})
 	if g.auditLog != nil {

@@ -25,6 +25,10 @@ type Options struct {
 	// DB holds branding_config and branding_profiles.
 	DB *store.DB
 
+	// OnChange hears that the settings were saved or reset, so the other
+	// instances of the installation read them again; nil for none.
+	OnChange func()
+
 	// UploadsDir is where logo and background pictures are stored and
 	// served from as /uploads/<file>. Node: <DATA_DIR>/uploads, and
 	// <console>/data/uploads without DATA_DIR.
@@ -322,7 +326,14 @@ func (s *Service) SaveBranding(ctx context.Context, updates any) (err error) {
 		}
 	}
 	s.LoadBranding(ctx)
+	s.changed()
 	return nil
+}
+
+func (s *Service) changed() {
+	if s.opts.OnChange != nil {
+		s.opts.OnChange()
+	}
 }
 
 // ResetBranding deletes every stored setting, so the defaults apply.
@@ -332,6 +343,7 @@ func (s *Service) ResetBranding(ctx context.Context) error {
 	}
 	s.InvalidateCache()
 	s.LoadBranding(ctx)
+	s.changed()
 	return nil
 }
 

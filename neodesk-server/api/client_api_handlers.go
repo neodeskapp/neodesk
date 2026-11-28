@@ -14,6 +14,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,11 +24,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/audit"
 	"github.com/neodeskapp/neodesk/neodesk-server/auth"
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/db"
 )
 
@@ -80,46 +81,76 @@ func classifyNeoDeskDevice(productSKU, connMode string) string {
 	return "neodesk"
 }
 
-// tfaSessionStore is a concurrency-safe in-memory store for pending 2FA sessions.
-// Sessions expire after 5 minutes.
+// tfaSessionStore holds the pending 2FA sessions in a KV (SetSharedKV), so
+// the second step can land on another instance than the first. A session
+// lives 5 minutes and is taken once. Each instance keeps at most 1000 of
+// its own at a time.
 type tfaSessionStore struct {
-	mu       sync.Mutex
-	sessions map[string]*tfaSession
+	kvHolder
+	cap *cluster.LocalCap
+}
+
+// tfaSessionLifetime is how long a pending 2FA session lives.
+const tfaSessionLifetime = 5 * time.Minute
+
+// tfaStored is a tfaSession as the KV holds it.
+type tfaStored struct {
+	Username   string    `json:"username"`
+	Role       string    `json:"role"`
+	UserID     int64     `json:"user_id"`
+	ClientID   string    `json:"client_id"`
+	ClientUUID string    `json:"client_uuid"`
+	ClientIP   string    `json:"client_ip"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 func newTFASessionStore() *tfaSessionStore {
-	return &tfaSessionStore{sessions: make(map[string]*tfaSession)}
+	return &tfaSessionStore{cap: cluster.NewLocalCap(1000)}
 }
 
+func tfaKey(secret string) string { return "tfa:" + secret }
+
 func (s *tfaSessionStore) put(secret string, sess *tfaSession) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Prune expired sessions (>5 min)
 	now := time.Now()
-	for k, v := range s.sessions {
-		if now.Sub(v.createdAt) > 5*time.Minute {
-			delete(s.sessions, k)
-		}
-	}
-	// Limit total sessions to prevent memory exhaustion
-	if len(s.sessions) >= 1000 {
+	if !s.cap.Add(secret, now, sess.createdAt.Add(tfaSessionLifetime)) {
 		return
 	}
-	s.sessions[secret] = sess
+	raw, err := json.Marshal(tfaStored{
+		Username: sess.username, Role: sess.role, UserID: sess.userID,
+		ClientID: sess.clientID, ClientUUID: sess.clientUUID, ClientIP: sess.clientIP,
+		CreatedAt: sess.createdAt,
+	})
+	if err == nil {
+		err = s.kv().Set(context.Background(), tfaKey(secret), string(raw), tfaSessionLifetime)
+	}
+	if err != nil {
+		s.cap.Remove(secret)
+		log.Printf("[api] keep a pending 2FA session: %v", err)
+	}
 }
 
 func (s *tfaSessionStore) take(secret string) *tfaSession {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, ok := s.sessions[secret]
+	s.cap.Remove(secret)
+	raw, ok, err := s.kv().Take(context.Background(), tfaKey(secret))
+	if err != nil {
+		log.Printf("[api] read a pending 2FA session: %v", err)
+		return nil
+	}
 	if !ok {
 		return nil
 	}
-	delete(s.sessions, secret)
-	if time.Since(sess.createdAt) > 5*time.Minute {
+	var st tfaStored
+	if json.Unmarshal([]byte(raw), &st) != nil {
+		return nil
+	}
+	if time.Since(st.CreatedAt) > tfaSessionLifetime {
 		return nil // expired
 	}
-	return sess
+	return &tfaSession{
+		username: st.Username, role: st.Role, userID: st.UserID,
+		clientID: st.ClientID, clientUUID: st.ClientUUID, clientIP: st.ClientIP,
+		createdAt: st.CreatedAt,
+	}
 }
 
 // rustdeskUserPayload builds a user object in the format the RustDesk client expects.

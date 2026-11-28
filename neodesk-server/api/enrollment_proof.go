@@ -20,8 +20,6 @@ const (
 
 type enrollmentProofVerifiedKey struct{}
 
-var enrollmentProofNonceCache = &ndMgmtNonceCache{items: make(map[string]time.Time)}
-
 // withEnrollmentProofVerified marks that this request already consumed a valid
 // enrollment proof for deviceID. Later token-issue authorization must not
 // verify the same nonce again (that would look like a replay).
@@ -95,7 +93,7 @@ func (s *Server) verifyEnrollmentDeviceProof(r *http.Request, deviceID, incoming
 	if !ed25519.Verify(ed25519.PublicKey(publicKey), payload, decodedSignature) {
 		return fmt.Errorf("invalid enrollment proof signature")
 	}
-	if enrollmentProofNonceCache.markUsed("enrollment:"+deviceID+":"+nonce, now) {
+	if !s.enrollmentNonceKeys().use(deviceID+":"+nonce, now) {
 		return fmt.Errorf("replayed enrollment proof")
 	}
 	return nil

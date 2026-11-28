@@ -483,3 +483,29 @@ func TestBrowserThatStopsAnsweringIsDropped(t *testing.T) {
 	reg.Close()
 	check()
 }
+
+// TestARemoteIDChangeIsNotCascadedAgain: with several instances every one
+// hears a changed id; only the one that published it rewrites the tables.
+func TestARemoteIDChangeIsNotCascadedAgain(t *testing.T) {
+	var cascaded [][2]string
+	svc := New(Options{Cascade: func(_ context.Context, a, b string) { cascaded = append(cascaded, [2]string{a, b}) }})
+	frame := func(remote bool) any {
+		text := `{"type":"peer_id_changed","timestamp":"2026-11-28T10:00:00Z","data":{"old_id":"111","new_id":"222"}`
+		if remote {
+			text += `,"remote":true`
+		}
+		v, err := goapi.Parse([]byte(text + "}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	svc.Handle(context.Background(), frame(true))
+	if len(cascaded) != 0 {
+		t.Fatalf("remote change cascaded: %v", cascaded)
+	}
+	svc.Handle(context.Background(), frame(false))
+	if len(cascaded) != 1 || cascaded[0] != [2]string{"111", "222"} {
+		t.Fatalf("local change cascaded %v, want once 111->222", cascaded)
+	}
+}

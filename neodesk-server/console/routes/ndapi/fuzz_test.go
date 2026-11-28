@@ -50,7 +50,7 @@ func FuzzVerifyProof(f *testing.F) {
 	f.Add("D", " "+public, now, strings.Repeat("n", 300), "AAAA")
 	f.Add("DEV1", "", "", "", "")
 	f.Fuzz(func(t *testing.T, device, key, timestamp, nonce, signature string) {
-		h := &handlers{nonces: newNonces(), now: time.Now}
+		h := &handlers{nonces: newNonces(nil), now: time.Now}
 		r := httptest.NewRequest("POST", "/api/nd/register", nil)
 		r.Header.Set("X-ND-Enrollment-Timestamp", timestamp)
 		r.Header.Set("X-ND-Enrollment-Nonce", nonce)

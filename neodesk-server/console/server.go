@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/access"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/admintoken"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/alerts"
@@ -89,6 +90,10 @@ type Options struct {
 	// Events is the server's event bus. nil turns the event stream of
 	// GoAPI off.
 	Events *events.Bus
+	// Settings is the settings bus of the installation (cluster mode):
+	// the console says there which of its settings it changed and reads
+	// again what other instances changed. nil when the server runs alone.
+	Settings *events.Bus
 	// Roles is the server's database with the role overrides. nil leaves
 	// every role with its built-in permissions.
 	Roles access.OverrideStore
@@ -124,6 +129,11 @@ type Options struct {
 	// instances (VALKEY_URL): LAN discovery and the mDNS announcement,
 	// which would announce one pod, stay off.
 	Clustered bool
+	// KV is the store of short-lived values the instances share
+	// (cluster.NewValkeyKV): the steps of used second-factor codes, the
+	// pending second steps of the client API and the nonces of device
+	// proofs. nil keeps them in memory, as a lone server does.
+	KV cluster.KV
 	// updaterOptions changes the updater's options before it is built:
 	// tests give it a GitHub and a binary of their own.
 	updaterOptions func(*updater.Options)
@@ -284,6 +294,11 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		},
 		Logf: func(format string, args ...any) { logging.Logf("console", "ERROR: "+format, args...) },
 	}
+	if opts.Settings != nil {
+		languages.OnChange = func(code string) {
+			events.SettingsChanged(opts.Settings, events.SettingsI18n, map[string]string{"code": code})
+		}
+	}
 
 	api := goapi.New(opts.API, goapi.WithHost(cfg.APIHost), goapi.WithEventBus(opts.Events), goapi.WithActor(accountName), goapi.WithToken(tokenName))
 
@@ -309,6 +324,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 
 		Leases:    opts.Leases,
 		Clustered: opts.Clustered,
+		KV:        opts.KV,
 	}
 	s.deps.ServerInfo = serverinfo.New(serverinfo.Options{
 		PubKeyPath: cfg.PubKeyPath,
@@ -344,11 +360,20 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	s.deps.Branding, err = branding.New(branding.Options{
 		DB: opts.Store, UploadsDir: cfg.UploadsDir, FontsDir: cfg.FontsDir, FontCacheFile: cfg.FontCacheFile,
 		TempDir: cfg.TempDir, ThemesDir: cfg.ThemesDir, PalettesFile: cfg.PalettesFile, FaviconFile: cfg.FaviconFile,
-		Files: cfg.Static,
+		Files:    cfg.Static,
+		OnChange: func() { events.SettingsChanged(opts.Settings, events.SettingsBranding, nil) },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("branding: %w", err)
 	}
+	events.OnSettingsChanged(ctx, opts.Settings, func(what string, data map[string]string) {
+		switch what {
+		case events.SettingsBranding:
+			s.deps.Branding.LoadBranding(ctx)
+		case events.SettingsI18n:
+			s.deps.I18n.Reload(data["code"])
+		}
+	})
 	s.deps.GuestAccess = guestaccess.New(guestaccess.Options{HTTPS: cfg.HTTPS, Secure: secure, GoAPI: api})
 	s.deps.FileTransfer = filetransfer.New(filetransfer.Options{Dir: cfg.TransfersDir, Logger: s.deps.Log})
 	s.jobs.Add("file transfer cleanup", s.deps.FileTransfer.Run)
@@ -458,6 +483,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 			return qr.PNGDataURL(text, qr.Options{Width: 256, Margin: 2})
 		},
 		Log: s.deps.Log.Child("AUTH"),
+		KV:  opts.KV,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in service: %w", err)

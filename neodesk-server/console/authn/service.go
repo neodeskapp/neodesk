@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/auth"
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/goapi"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/store"
 	"github.com/neodeskapp/neodesk/neodesk-server/internal/envvar"
@@ -222,6 +223,10 @@ type Options struct {
 	// Sleep waits in EnsureDefaultAdmin. Nil means a real wait that ends
 	// early when ctx does.
 	Sleep func(ctx context.Context, d time.Duration) error
+	// KV holds the steps of the codes that signed accounts in, which the
+	// instances of an installation share, so a code works once on all of
+	// them. Nil keeps them in memory.
+	KV cluster.KV
 }
 
 // Service is the console's sign-in service. It is safe for concurrent use.
@@ -258,9 +263,9 @@ type Service struct {
 	mu sync.Mutex
 	// forceUsed is set once ForcePasswordUpdate has had its one effect.
 	forceUsed bool
-	// totpSteps holds per account the step of the last code that signed
-	// it in (useTOTPStep).
-	totpSteps map[int64]int64
+	// kv holds per account the steps of the codes that signed it in
+	// (useTOTPStep)
+	kv cluster.KV
 }
 
 // New returns a service. DB and GoAPI are required.
@@ -286,6 +291,10 @@ func New(opts Options) (*Service, error) {
 		dummy:          dummyHash,
 		windows:        runtime.GOOS == "windows",
 		zone:           time.Local,
+		kv:             opts.KV,
+	}
+	if s.kv == nil {
+		s.kv = cluster.NewMemKV()
 	}
 	s.tokenDays.Store(int64(s.set.TokenExpiryDays))
 	if s.log == nil {

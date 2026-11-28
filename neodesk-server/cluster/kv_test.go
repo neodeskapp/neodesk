@@ -84,6 +84,87 @@ func runKVSuite(t *testing.T, newKV func(t *testing.T) KV) {
 			t.Fatal("DelIf kept its own value")
 		}
 	})
+
+	t.Run("take hands a value out once", func(t *testing.T) {
+		kv := newKV(t)
+		if _, ok, err := kv.Take(ctx, "code"); ok || err != nil {
+			t.Fatalf("take of nothing = %v %v", ok, err)
+		}
+		_ = kv.Set(ctx, "code", "secret", time.Minute)
+		if v, ok, err := kv.Take(ctx, "code"); !ok || v != "secret" || err != nil {
+			t.Fatalf("take = %q %v %v", v, ok, err)
+		}
+		if _, ok, _ := kv.Take(ctx, "code"); ok {
+			t.Fatal("a value was taken twice")
+		}
+		if _, ok, _ := kv.Get(ctx, "code"); ok {
+			t.Fatal("value outlived Take")
+		}
+	})
+
+	t.Run("take races have one winner", func(t *testing.T) {
+		kv := newKV(t)
+		_ = kv.Set(ctx, "once", "v", time.Minute)
+		var wins atomic.Int32
+		var wg sync.WaitGroup
+		for range 20 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, ok, _ := kv.Take(ctx, "once"); ok {
+					wins.Add(1)
+				}
+			}()
+		}
+		wg.Wait()
+		if wins.Load() != 1 {
+			t.Fatalf("%d winners", wins.Load())
+		}
+	})
+
+	t.Run("take skips an expired value", func(t *testing.T) {
+		kv := newKV(t)
+		_ = kv.Set(ctx, "old", "x", 100*time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
+		if _, ok, _ := kv.Take(ctx, "old"); ok {
+			t.Fatal("an expired value was taken")
+		}
+	})
+
+	t.Run("use once", func(t *testing.T) {
+		kv := newKV(t)
+		at := time.Unix(1_800_000_000, 0)
+		if ok, err := UseOnce(ctx, kv, "n", at, time.Minute); !ok || err != nil {
+			t.Fatalf("first use = %v %v", ok, err)
+		}
+		if ok, _ := UseOnce(ctx, kv, "n", at.Add(time.Minute), time.Minute); ok {
+			t.Fatal("a use within ttl worked again")
+		}
+		if ok, _ := UseOnce(ctx, kv, "n", at.Add(time.Minute+time.Millisecond), time.Minute); !ok {
+			t.Fatal("a use older than ttl still blocks")
+		}
+		if ok, _ := UseOnce(ctx, kv, "n", at.Add(time.Minute+2*time.Millisecond), time.Minute); ok {
+			t.Fatal("the renewed use does not count")
+		}
+	})
+}
+
+func TestLocalCap(t *testing.T) {
+	c := NewLocalCap(2)
+	now := time.Unix(1_800_000_000, 0)
+	if !c.Add("a", now, now.Add(time.Minute)) || !c.Add("b", now, now.Add(2*time.Minute)) {
+		t.Fatal("room below the cap was refused")
+	}
+	if c.Add("c", now.Add(30*time.Second), now.Add(time.Hour)) {
+		t.Fatal("a key over the cap was counted")
+	}
+	if !c.Add("c", now.Add(time.Minute), now.Add(time.Hour)) {
+		t.Fatal("an expired key made no room")
+	}
+	c.Remove("b")
+	if c.Len() != 1 {
+		t.Fatalf("len = %d after Remove", c.Len())
+	}
 }
 
 func TestMemKV(t *testing.T) {

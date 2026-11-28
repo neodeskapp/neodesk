@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"testing"
+	"time"
+
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 )
 
 // canonicalKey reads a key the forgiving way Node's Buffer.from(text,
@@ -47,11 +50,9 @@ func TestCanonicalKey(t *testing.T) {
 	}
 }
 
-// A nonce counts once per device for ten minutes. Below 20,000 kept,
-// every old one is dropped; above, dropping stops once half that many are
-// left.
+// A nonce counts once per device for ten minutes.
 func TestNonces(t *testing.T) {
-	n := newNonces()
+	n := newNonces(nil)
 	if n.markUsed("a", 0) || !n.markUsed("a", 1000) {
 		t.Fatal("a nonce is a replay the second time")
 	}
@@ -61,21 +62,19 @@ func TestNonces(t *testing.T) {
 	if !n.markUsed("a", nonceTTLMs+2) {
 		t.Error("a nonce noted again counts again")
 	}
+}
 
-	full := newNonces()
-	for i := range nonceCacheMax {
-		full.markUsed(fmt.Sprint(i), int64(i))
+// Two instances that share one KV: a nonce used on one is a replay on
+// the other.
+func TestNoncesShared(t *testing.T) {
+	kv := cluster.NewMemKV()
+	a, b := newNonces(kv), newNonces(kv)
+	now := time.Now().UnixMilli()
+	if a.markUsed("enrollment:D:n", now) {
+		t.Fatal("the first use is a replay")
 	}
-	// All are old now; the prune stops at half
-	full.markUsed("new", int64(nonceCacheMax)+nonceTTLMs+1)
-	if got := full.order.Len(); got != nonceCacheMax/2+1 {
-		t.Errorf("after pruning a full cache: %d kept", got)
-	}
-	if _, kept := full.at["0"]; kept {
-		t.Error("the oldest goes first")
-	}
-	if _, kept := full.at[fmt.Sprint(nonceCacheMax-1)]; !kept {
-		t.Error("the newest stays")
+	if !b.markUsed("enrollment:D:n", now) {
+		t.Error("a nonce used on one instance worked on the other")
 	}
 }
 

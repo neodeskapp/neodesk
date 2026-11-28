@@ -57,6 +57,10 @@ type Gateway struct {
 	// devices holds all authenticated CDAP connections keyed by device ID.
 	devices sync.Map // map[string]*DeviceConn
 
+	// presence tells the other instances which devices this one holds;
+	// nil when the server runs alone.
+	presence Presence
+
 	// pendingCommands tracks commands sent to devices, keyed by command ID.
 	pendingCommands sync.Map // map[string]*PendingCommand
 
@@ -160,6 +164,9 @@ func (g *Gateway) SetRateLimiter(l *ratelimit.IPLimiter) { g.limiter = l }
 
 // SetVersion sets the version string for startup log.
 func (g *Gateway) SetVersion(v string) { g.version = v }
+
+// SetPresence shares which devices this instance holds (cluster mode).
+func (g *Gateway) SetPresence(p Presence) { g.presence = p }
 
 // Delegations returns the delegation store for auth delegation management.
 func (g *Gateway) Delegations() *DelegationStore { return g.delegations }
@@ -548,6 +555,12 @@ func (g *Gateway) removeDevice(dc *DeviceConn) {
 
 	g.cleanupDeviceSessions(dc.ID, "device disconnected")
 
+	// A device that has reconnected to another instance stays online there
+	if g.presence != nil && !g.presence.Release("cdap", dc.ID) {
+		log.Printf("[cdap] %s: disconnected here, now held by another instance", dc.ID)
+		return
+	}
+
 	// Update peer status to OFFLINE
 	if err := g.db.UpdatePeerStatus(dc.ID, "OFFLINE", dc.ClientIP, "cdap"); err != nil {
 		log.Printf("[cdap] %s: failed to set offline: %v", dc.ID, err)
@@ -669,4 +682,13 @@ func (g *Gateway) GetDeviceConn(deviceID string) *DeviceConn {
 // the blocklist and the logs: the API's rule (config's ClientIP).
 func extractIP(r *http.Request, cfg *config.Config) string {
 	return cfg.ClientIP(r)
+}
+
+// Presence records which instance of the installation holds a device's
+// socket (cluster.Devices). Release reports whether the device is still
+// this instance's to mark offline: false when it has reconnected to
+// another instance meanwhile.
+type Presence interface {
+	Hold(kind, id string)
+	Release(kind, id string) bool
 }

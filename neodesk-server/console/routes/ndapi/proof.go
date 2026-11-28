@@ -1,15 +1,15 @@
 package ndapi
 
 import (
-	"container/list"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"math"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/httpx"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/routes/internal/jsreq"
 )
@@ -36,56 +36,29 @@ const (
 	clockSkewMs    = 5 * 60 * 1000
 	nonceMaxLength = 256
 	nonceTTLMs     = 10 * 60 * 1000
-	nonceCacheMax  = 20000
 )
 
-// nonces are the nonces of good proofs with the time they were used, in
-// the order they came (usedNonces of the old module, a Map).
+// nonces are the nonces of good proofs, in a KV (kit.Deps.KV) the
+// instances of an installation share, so a proof used on one is a replay
+// on all. Each is kept with the time it was used for ten minutes.
 type nonces struct {
-	mu    sync.Mutex
-	order *list.List
-	at    map[string]*list.Element
+	kv cluster.KV
 }
 
-type usedNonce struct {
-	key string
-	ms  int64
-}
-
-func newNonces() *nonces {
-	return &nonces{order: list.New(), at: map[string]*list.Element{}}
-}
-
-// prune drops nonces older than ten minutes. With fewer than 20,000 kept
-// it looks at all of them; with more it stops as soon as half that many
-// are left.
-func (n *nonces) prune(now int64) {
-	full := n.order.Len() >= nonceCacheMax
-	for e := n.order.Front(); e != nil; {
-		next := e.Next()
-		used := e.Value.(usedNonce)
-		if now-used.ms > nonceTTLMs {
-			n.order.Remove(e)
-			delete(n.at, used.key)
-		}
-		if full && n.order.Len() <= nonceCacheMax/2 {
-			return
-		}
-		e = next
+// newNonces keeps the nonces in kv, or in memory when kv is nil.
+func newNonces(kv cluster.KV) *nonces {
+	if kv == nil {
+		kv = cluster.NewMemKV()
 	}
+	return &nonces{kv: kv}
 }
 
-// markUsed notes a nonce and reports whether it was noted already (a
-// replay).
+// markUsed notes a nonce at now (milliseconds) and reports whether it was
+// noted already within ten minutes (a replay). When the KV does not
+// answer, the proof counts as a replay and is refused.
 func (n *nonces) markUsed(key string, now int64) bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.prune(now)
-	if _, seen := n.at[key]; seen {
-		return true
-	}
-	n.at[key] = n.order.PushBack(usedNonce{key: key, ms: now})
-	return false
+	fresh, err := cluster.UseOnce(context.Background(), n.kv, "console:nd:nonce:"+key, time.UnixMilli(now), nonceTTLMs*time.Millisecond)
+	return err != nil || !fresh
 }
 
 // canonicalKey is canonicalizePublicKey: the standard base64 of a key

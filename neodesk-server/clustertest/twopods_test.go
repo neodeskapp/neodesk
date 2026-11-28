@@ -22,6 +22,7 @@ import (
 	"github.com/neodeskapp/neodesk/neodesk-server/config"
 	"github.com/neodeskapp/neodesk/neodesk-server/crypto"
 	"github.com/neodeskapp/neodesk/neodesk-server/db"
+	"github.com/neodeskapp/neodesk/neodesk-server/events"
 	pb "github.com/neodeskapp/neodesk/neodesk-server/proto"
 	"github.com/neodeskapp/neodesk/neodesk-server/relay"
 	"github.com/neodeskapp/neodesk/neodesk-server/signal"
@@ -161,6 +162,7 @@ func (f *fixture) startPod(t *testing.T, name string) *pod {
 		p.sig.PeerMap().SetDirectory(dir, name)
 		t.Cleanup(p.sig.PeerMap().Close)
 		p.sig.SetCluster(mesh, kv)
+		p.sig.EventBus().Join(ctx, name, cluster.NewEventLinkOn(f.client, f.prefix))
 		if !f.noMeet {
 			p.relay.SetCluster(mesh, kv)
 		}
@@ -439,5 +441,36 @@ func waitVisible(p *pod, id string) {
 	deadline := time.Now().Add(time.Second)
 	for p.sig.PeerMap().Get(id) == nil && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestADeviceOnlineOnOnePodShowsLiveOnAnother: a peer registers on pod A;
+// pod B's event bus, which the console's live sockets on B read, hears it
+// come online.
+func TestADeviceOnlineOnOnePodShowsLiveOnAnother(t *testing.T) {
+	f := newFixture(t, true)
+	a, b := f.startPod(t, "pod-a"), f.startPod(t, "pod-b")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := cluster.NewEventLinkOn(f.client, f.prefix).Ready(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+	sub := b.sig.EventBus().Subscribe(events.EventPeerOnline)
+	defer b.sig.EventBus().Unsubscribe(sub)
+
+	peerA := newPeer(t, uniqueID("1"), a.signal)
+	peerA.register(t)
+	for {
+		select {
+		case ev := <-sub.Ch:
+			if ev.Data["id"] == peerA.id {
+				if !ev.Remote {
+					t.Fatal("the event is not marked as another pod's")
+				}
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("pod b never heard the peer on pod a come online")
+		}
 	}
 }

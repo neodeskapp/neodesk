@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/console/goapi"
 )
 
@@ -152,32 +153,61 @@ func TestDecodeBase64LikeNode(t *testing.T) {
 }
 
 func TestPendingSecondSteps(t *testing.T) {
-	s := &tfaSessions{}
+	s := newTFASessions(nil)
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	s.add("old", tfaSession{userID: 1, createdAt: start})
-	if _, ok := s.get("old", start); !ok {
+	found := func(secret any, at time.Time) bool {
+		t.Helper()
+		_, ok, err := s.get(secret, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	_ = s.add("old", tfaSession{userID: 1, createdAt: start})
+	if !found("old", start) {
 		t.Fatal("a pending step is not kept")
 	}
-	if _, ok := s.get(5.0, start); ok {
+	if found(5.0, start) {
 		t.Error("a secret that is no text matched")
 	}
 	// A step is good for five minutes, also when no other sign-in comes
 	// in between (BUGS RD5)
-	if _, ok := s.get("old", start.Add(5*time.Minute)); !ok {
+	if !found("old", start.Add(5*time.Minute)) {
 		t.Error("an entry of exactly five minutes was refused")
 	}
-	if _, ok := s.get("old", start.Add(5*time.Minute+time.Millisecond)); ok {
+	if found("old", start.Add(5*time.Minute+time.Millisecond)) {
 		t.Error("an entry older than five minutes was found")
 	}
-	// A new step drops the ones older than five minutes
-	s.add("new", tfaSession{userID: 2, createdAt: start.Add(5 * time.Minute)})
-	s.add("newer", tfaSession{userID: 3, createdAt: start.Add(10*time.Minute + time.Millisecond)})
-	if _, kept := s.pending["new"]; kept || len(s.pending) != 1 {
-		t.Errorf("the steps left after a new one: %v", s.pending)
+	_ = s.add("newer", tfaSession{userID: 3, createdAt: start.Add(10 * time.Minute)})
+	if used, _ := s.remove("newer"); !used {
+		t.Error("the first use of a secret was refused")
 	}
-	s.remove("newer")
-	if _, ok := s.get("newer", start.Add(10*time.Minute)); ok {
+	if found("newer", start.Add(10*time.Minute)) {
 		t.Error("a used secret works again")
+	}
+	if used, _ := s.remove("newer"); used {
+		t.Error("a secret was used up twice")
+	}
+}
+
+// Two instances that share one KV: a second step started on one is
+// found and used up on the other, once.
+func TestPendingSecondStepsShared(t *testing.T) {
+	kv := cluster.NewMemKV()
+	a, b := newTFASessions(kv), newTFASessions(kv)
+	now := time.Now()
+	if err := a.add("s", tfaSession{userID: 4, username: "alice", clientID: "D", createdAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := b.get("s", now)
+	if err != nil || !ok || got.userID != 4 || got.username != "alice" || got.clientID != "D" {
+		t.Fatalf("the other instance got %+v %v %v", got, ok, err)
+	}
+	if used, _ := b.remove("s"); !used {
+		t.Fatal("the other instance could not use the secret")
+	}
+	if used, _ := a.remove("s"); used {
+		t.Error("a secret used on one instance was used again on the other")
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -250,7 +251,7 @@ func (s *Service) VerifyTOTPCode(ctx context.Context, userID int64, token string
 	if err != nil || !valid {
 		return false, err
 	}
-	return s.useTOTPStep(userID, totpStep(now)), nil
+	return s.useTOTPStep(ctx, userID, totpStep(now))
 }
 
 // totpStep is the number of the 30-second step that contains at.
@@ -258,25 +259,25 @@ func totpStep(at time.Time) int64 {
 	return int64(math.Max(0, math.Floor(float64(at.UnixMilli())/totpStepMillis)))
 }
 
+// totpStepTTL is how long the KV keeps the step of a code that signed an
+// account in: past it, the clock has moved on and the code of that step is
+// no longer accepted anyway.
+const totpStepTTL = 3 * totpStepMillis * time.Millisecond
+
+func totpStepKey(userID, step int64) string {
+	return "totp:" + strconv.FormatInt(userID, 10) + ":" + strconv.FormatInt(step, 10)
+}
+
 // useTOTPStep notes that a code of step signed the account in. It is false
-// when a code of that step or a later one already did. Steps older than
-// the one before step are forgotten: their codes are no longer accepted.
-func (s *Service) useTOTPStep(userID, step int64) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if last, ok := s.totpSteps[userID]; ok && last >= step {
-		return false
+// when a code of that step or the next one already did, on any instance
+// that shares the KV: the step is taken with SetNX, so of two sign-ins
+// with one code only one gets it.
+func (s *Service) useTOTPStep(ctx context.Context, userID, step int64) (bool, error) {
+	if _, later, err := s.kv.Get(ctx, totpStepKey(userID, step+1)); err != nil || later {
+		return false, err
 	}
-	if s.totpSteps == nil {
-		s.totpSteps = map[int64]int64{}
-	}
-	for id, last := range s.totpSteps {
-		if last < step-1 {
-			delete(s.totpSteps, id)
-		}
-	}
-	s.totpSteps[userID] = step
-	return true
+	_, set, err := s.kv.SetNX(ctx, totpStepKey(userID, step), "1", totpStepTTL)
+	return set, err
 }
 
 // VerifyRecoveryCode checks a recovery code in place of the second factor

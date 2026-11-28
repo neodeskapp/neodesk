@@ -31,6 +31,7 @@ import (
 	"github.com/neodeskapp/neodesk/neodesk-server/console/updater"
 	"github.com/neodeskapp/neodesk/neodesk-server/crypto"
 	"github.com/neodeskapp/neodesk/neodesk-server/db"
+	"github.com/neodeskapp/neodesk/neodesk-server/events"
 	"github.com/neodeskapp/neodesk/neodesk-server/internal/envvar"
 	"github.com/neodeskapp/neodesk/neodesk-server/internal/productversion"
 	"github.com/neodeskapp/neodesk/neodesk-server/logging"
@@ -672,6 +673,10 @@ func serverMain(stop <-chan struct{}) (exitCode int) {
 				logging.Fatalf("The start stops: %v", err)
 			}
 			sig.SetCluster(clusterRT.mesh, clusterRT.kv)
+			// A relay billed on one pod may pair on another
+			billingSvc.SetShared(clusterRT.kv)
+			// Console events reach the sockets and services of every pod
+			sig.EventBus().Join(ctx, clusterRT.cfg.Name, cluster.NewEventLink(clusterRT.valkey))
 		}
 		if err := sig.Start(ctx); err != nil {
 			logging.Fatalf("Failed to start signal server: %v", err)
@@ -707,6 +712,11 @@ func serverMain(stop <-chan struct{}) (exitCode int) {
 		defer relaySrv.Stop()
 
 		apiSrv := api.New(cfg, database, sig.PeerMap(), relaySrv, Version)
+		// Short-lived sign-in state (2FA steps, OIDC, sign-in codes, nonces)
+		// is shared when several pods serve the installation
+		if clusterRT.kv != nil {
+			apiSrv.SetSharedKV(clusterRT.kv)
+		}
 		defer attachPanelSync(apiSrv, billingSvc, database, cfg.DBPath, cfg.AuthDBPath)()
 		attachPanelTrust(apiSrv)
 		apiSrv.SetBlocklist(blocklist)
@@ -798,6 +808,19 @@ func serverMain(stop <-chan struct{}) (exitCode int) {
 				}
 			}
 			apiSrv.SetMeshGateway(meshGw)
+		}
+
+		// Device sockets stay on the pod they reach; requests for them
+		// from other pods are passed to it
+		if clusterRT.mesh != nil {
+			clusterRT.shareDevices(ctx, apiSrv, cdapGw, meshGw)
+			// Settings saved on one pod are read again on the others
+			clusterRT.shareSettings(ctx, apiSrv, blocklist, reloadHandler.Execute)
+			adminSrv.SetReloadFunc(func() error {
+				err := reloadHandler.Execute()
+				events.SettingsChanged(clusterRT.settings, events.SettingsConfig, nil)
+				return err
+			})
 		}
 
 		apiSrv.SetDerivedClientPort(startDerivedClientPort(cfg, os.Getenv))

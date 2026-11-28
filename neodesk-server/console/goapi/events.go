@@ -40,6 +40,11 @@ func (c *Client) Events(ctx context.Context, filter string) (<-chan *Object, err
 					continue
 				}
 				obj, _ := frame.(*Object)
+				if obj != nil && evt.Remote {
+					// Another instance published it: services that act on
+					// events (rather than show them) leave it to that one
+					obj.Set("remote", true)
+				}
 				select {
 				case frames <- obj:
 				case <-ctx.Done():

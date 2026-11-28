@@ -25,6 +25,9 @@ type KV interface {
 	Del(ctx context.Context, key string) error
 	// DelIf removes key only while it holds value.
 	DelIf(ctx context.Context, key, value string) error
+	// Take returns the value of key and removes it in one step, so of
+	// several callers only one gets it; ok is false when there is none.
+	Take(ctx context.Context, key string) (value string, ok bool, err error)
 }
 
 // MemKV is KV in the process.
@@ -108,6 +111,16 @@ func (m *MemKV) DelIf(_ context.Context, key, value string) error {
 	return nil
 }
 
+func (m *MemKV) Take(_ context.Context, key string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.getLocked(key)
+	if ok {
+		delete(m.vals, key)
+	}
+	return v, ok, nil
+}
+
 // ValkeyKV is KV in Valkey under the installation's prefix.
 type ValkeyKV struct {
 	rdb    redis.UniversalClient
@@ -181,4 +194,17 @@ func (k *ValkeyKV) DelIf(ctx context.Context, key, value string) error {
 	ctx, cancel := withKVTimeout(ctx)
 	defer cancel()
 	return delIf.Run(ctx, k.rdb, []string{k.prefix + key}, value).Err()
+}
+
+func (k *ValkeyKV) Take(ctx context.Context, key string) (string, bool, error) {
+	ctx, cancel := withKVTimeout(ctx)
+	defer cancel()
+	v, err := k.rdb.GetDel(ctx, k.prefix+key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return v, true, nil
 }

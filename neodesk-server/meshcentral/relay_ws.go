@@ -118,6 +118,10 @@ func (g *Gateway) handleRelayWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
+	// A relay another instance set up meets there
+	if route := g.relayRouter; route != nil && g.getRelayMeta(relayID) == nil && route(w, r, relayID) {
+		return
+	}
 	cookie, ok := g.relayCookie(relayID, q.Get("auth"), q.Get("rauth"))
 	if !ok {
 		http.Error(w, "invalid auth", http.StatusForbidden)
@@ -219,7 +223,7 @@ func (g *Gateway) waitAsFirstPeer(ctx context.Context, session *relaySession, pe
 	}
 	if session.abandon() {
 		g.relays.CompareAndDelete(session.id, session)
-		g.relayMeta.Delete(session.id)
+		g.setRelayMeta(session.id, nil)
 		peer.ws.Close(websocket.StatusGoingAway, "")
 		return
 	}
@@ -278,7 +282,7 @@ func (g *Gateway) pipeSession(ctx context.Context, relayID, proto string, peer1,
 		recorder.Close()
 	}
 	g.relays.Delete(relayID)
-	g.relayMeta.Delete(relayID)
+	g.setRelayMeta(relayID, nil)
 
 	if g.auditLog != nil {
 		fields := map[string]string{

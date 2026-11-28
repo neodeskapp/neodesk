@@ -115,6 +115,9 @@ func (g *Gateway) handleRegister(ctx context.Context, dc *DeviceConn) error {
 
 	// Register in gateway's device map
 	g.devices.Store(dc.ID, dc)
+	if g.presence != nil {
+		g.presence.Hold("cdap", dc.ID)
+	}
 
 	// Update peer status to ONLINE
 	g.db.UpdatePeerStatus(dc.ID, "ONLINE", dc.ClientIP, "cdap")

@@ -200,10 +200,13 @@ func (h *handlers) login(w http.ResponseWriter, r *http.Request) {
 			serverError(err)
 			return
 		}
-		h.tfa.add(secret, tfaSession{
+		if err := h.tfa.add(secret, tfaSession{
 			userID: userID, username: user.Username, role: user.Role.String,
 			clientID: clientID, clientUUID: clientUUID, createdAt: h.now(),
-		})
+		}); err != nil {
+			serverError(err)
+			return
+		}
 		if err := h.audit(ctx, userID, "api_login_tfa_required", "Client: "+orUnknown(clientID), ip); err != nil {
 			serverError(err)
 			return
@@ -287,7 +290,11 @@ func (h *handlers) secondStep(w http.ResponseWriter, r *http.Request, ip string,
 		fail(w, r, http.StatusInternalServerError, msgServerError)
 	}
 	secret := member(body, "secret")
-	pending, ok := h.tfa.get(secret, h.now())
+	pending, ok, err := h.tfa.get(secret, h.now())
+	if err != nil {
+		serverError(err)
+		return
+	}
 	if !ok {
 		fail(w, r, http.StatusUnauthorized, "TFA session expired or invalid")
 		return
@@ -318,7 +325,15 @@ func (h *handlers) secondStep(w http.ResponseWriter, r *http.Request, ip string,
 		fail(w, r, http.StatusUnauthorized, "Invalid verification code")
 		return
 	}
-	h.tfa.remove(secret.(string))
+	// The secret is used up here, once on all instances: a second
+	// request with it that got this far is refused
+	if used, err := h.tfa.remove(secret.(string)); err != nil {
+		serverError(err)
+		return
+	} else if !used {
+		fail(w, r, http.StatusUnauthorized, "TFA session expired or invalid")
+		return
+	}
 
 	_ = h.d.Authn.RecordAttempt(ctx, pending.username, ip, true)
 	// The client id and UUID of this step, else those of the first step;

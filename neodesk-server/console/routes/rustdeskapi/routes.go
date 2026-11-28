@@ -68,7 +68,7 @@ func Register(d *kit.Deps) {
 		d:           d,
 		store:       &clientStore{db: d.Store, log: log, now: time.Now},
 		now:         time.Now,
-		tfa:         &tfaSessions{},
+		tfa:         newTFASessions(d.KV),
 		totpBypass:  isTrue("RUSTDESK_API_DISABLE_TOTP") && isTrue("RUSTDESK_API_DISABLE_TOTP_ACKNOWLEDGED"),
 		auditFromGo: d.Config == nil || !d.Config.APIEnabled,
 		sysinfoLog:  &logThrottle{},

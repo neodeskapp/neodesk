@@ -76,6 +76,12 @@ func (s *Server) SetCluster(mesh Mesh, kv cluster.KV) {
 	mesh.Handle("signal.cancel-punch", s.serveCancelPunch)
 	mesh.Handle("signal.local-addr", s.serveLocalAddr)
 	mesh.Handle("signal.peer-moved", s.servePeerMoved)
+	mesh.Handle("signal.peer-remove", s.servePeerRemove)
+	// Deleting, banning or revoking a peer on any pod closes its socket on
+	// the pod that holds it
+	s.peers.SetRemoteRemoveHandler(func(owner, id string) {
+		s.call(owner, "signal.peer-remove", remoteMsg{ID: id})
+	})
 	// A publish that replaced another pod's entry tells that pod too, for
 	// a move faster than that pod's own publish
 	s.peers.SetMovedHandler(func(id, from string) {
@@ -387,4 +393,19 @@ func (s *Server) servePeerMoved(_ context.Context, from string, body []byte) ([]
 		log.Printf("[signal] cluster: peer %s moved to %s; dropped here", req.ID, from)
 	}
 	return answer(dropped), nil
+}
+
+// servePeerRemove removes a peer this pod holds, for a pod where the peer
+// was deleted, banned or revoked.
+func (s *Server) servePeerRemove(_ context.Context, from string, body []byte) ([]byte, error) {
+	req, _, err := decodeRemote(body)
+	if err != nil || req.ID == "" {
+		return nil, errors.New("bad peer-remove")
+	}
+	removed := s.peers.GetLocal(req.ID) != nil
+	if removed {
+		s.peers.Remove(req.ID)
+		log.Printf("[signal] cluster: peer %s removed at the request of %s", req.ID, from)
+	}
+	return answer(removed), nil
 }

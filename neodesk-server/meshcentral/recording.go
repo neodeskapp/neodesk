@@ -19,12 +19,20 @@ type relayMeta struct {
 	ViewOnly    bool
 }
 
+// setRelayMeta keeps or (nil) forgets a relay this instance set up. In a
+// cluster the relay's sockets meet here: the record tells other instances
+// to pass them on (SetRelayRouter).
 func (g *Gateway) setRelayMeta(relayID string, meta *relayMeta) {
 	if meta == nil {
-		g.relayMeta.Delete(relayID)
+		if _, had := g.relayMeta.LoadAndDelete(relayID); had && g.presence != nil {
+			g.presence.Release("meshrelay", relayID)
+		}
 		return
 	}
 	g.relayMeta.Store(relayID, meta)
+	if g.presence != nil {
+		g.presence.Hold("meshrelay", relayID)
+	}
 }
 
 func (g *Gateway) getRelayMeta(relayID string) *relayMeta {

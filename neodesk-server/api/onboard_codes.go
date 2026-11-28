@@ -472,7 +472,7 @@ func (s *Server) verifyJoinProof(deviceID string, bound []byte, p *joinProof) er
 	if !ed25519.Verify(ed25519.PublicKey(bound), payload, signature) {
 		return errors.New("the proof's signature is not the device's")
 	}
-	if enrollmentProofNonceCache.markUsed("enrollment:"+deviceID+":"+nonce, now) {
+	if !s.enrollmentNonceKeys().use(deviceID+":"+nonce, now) {
 		return errJoinProofReplayed
 	}
 	return nil

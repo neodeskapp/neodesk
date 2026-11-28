@@ -23,6 +23,7 @@ package api
 // is decided once.
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/audit"
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/db"
 )
 
@@ -96,11 +98,101 @@ func (l *consoleLogin) expired(now time.Time) bool {
 	return now.Sub(l.created) >= consoleLoginLifetime
 }
 
-// consoleLogins are the requests in progress. The zero value is ready.
+// consoleLogins are the requests in progress, in a KV (SetSharedKV): the
+// app may start and poll on one instance and the console decide on
+// another. A request is kept under its id, and its poll code points to
+// the id. Each instance keeps at most maxConsoleLogins of its own at a
+// time. The zero value is ready.
 type consoleLogins struct {
-	mu        sync.Mutex
-	byCode    map[string]*consoleLogin
-	byRequest map[string]*consoleLogin
+	kvHolder
+	capOnce sync.Once
+	started *cluster.LocalCap
+}
+
+// consoleLoginStored is a consoleLogin as the KV holds it.
+type consoleLoginStored struct {
+	Code       string    `json:"code"`
+	Request    string    `json:"request"`
+	DeviceID   string    `json:"device_id"`
+	UUID       string    `json:"uuid"`
+	DeviceName string    `json:"device_name"`
+	OS         string    `json:"os"`
+	Kind       string    `json:"kind"`
+	IP         string    `json:"ip"`
+	Created    time.Time `json:"created"`
+	State      string    `json:"state"`
+	Account    int64     `json:"account"`
+}
+
+func (l consoleLogin) stored() consoleLoginStored {
+	return consoleLoginStored{
+		Code: l.code, Request: l.request, DeviceID: l.deviceID, UUID: l.uuid,
+		DeviceName: l.deviceName, OS: l.os, Kind: l.kind, IP: l.ip,
+		Created: l.created, State: l.state, Account: l.account,
+	}
+}
+
+func (st consoleLoginStored) login() consoleLogin {
+	return consoleLogin{
+		code: st.Code, request: st.Request, deviceID: st.DeviceID, uuid: st.UUID,
+		deviceName: st.DeviceName, os: st.OS, kind: st.Kind, ip: st.IP,
+		created: st.Created, state: st.State, account: st.Account,
+	}
+}
+
+func consoleLoginRequestKey(request string) string { return "console-login:req:" + request }
+func consoleLoginCodeKey(code string) string       { return "console-login:code:" + code }
+func consoleLoginDecideKey(request string) string  { return "console-login:decide:" + request }
+
+func (ls *consoleLogins) cap() *cluster.LocalCap {
+	ls.capOnce.Do(func() { ls.started = cluster.NewLocalCap(maxConsoleLogins) })
+	return ls.started
+}
+
+// left is how long l still lives at now, at least a millisecond.
+func (l *consoleLogin) left(now time.Time) time.Duration {
+	d := consoleLoginLifetime - now.Sub(l.created)
+	if d < time.Millisecond {
+		d = time.Millisecond
+	}
+	return d
+}
+
+// save writes l under its id for the rest of its life.
+func (ls *consoleLogins) save(ctx context.Context, l consoleLogin, now time.Time) error {
+	raw, err := json.Marshal(l.stored())
+	if err != nil {
+		return err
+	}
+	return ls.kv().Set(ctx, consoleLoginRequestKey(l.request), string(raw), l.left(now))
+}
+
+// load reads the request with this id. A request that expired at now is
+// dropped and not found.
+func (ls *consoleLogins) load(ctx context.Context, request string, now time.Time) (consoleLogin, bool, error) {
+	raw, ok, err := ls.kv().Get(ctx, consoleLoginRequestKey(request))
+	if err != nil || !ok {
+		return consoleLogin{}, false, err
+	}
+	var st consoleLoginStored
+	if err := json.Unmarshal([]byte(raw), &st); err != nil {
+		return consoleLogin{}, false, err
+	}
+	l := st.login()
+	if l.expired(now) {
+		ls.drop(ctx, l)
+		return consoleLogin{}, false, nil
+	}
+	return l, true, nil
+}
+
+// drop removes a request, its poll code and its decision key.
+func (ls *consoleLogins) drop(ctx context.Context, l consoleLogin) {
+	kv := ls.kv()
+	_ = kv.Del(ctx, consoleLoginRequestKey(l.request))
+	_ = kv.Del(ctx, consoleLoginCodeKey(l.code))
+	_ = kv.Del(ctx, consoleLoginDecideKey(l.request))
+	ls.cap().Remove(l.code)
 }
 
 func newConsoleLoginSecret() (string, error) {
@@ -109,12 +201,6 @@ func newConsoleLoginSecret() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-// dropLocked removes a request from both maps.
-func (ls *consoleLogins) dropLocked(l *consoleLogin) {
-	delete(ls.byCode, l.code)
-	delete(ls.byRequest, l.request)
 }
 
 // start keeps a new pending request made from l's device fields and
@@ -131,68 +217,74 @@ func (ls *consoleLogins) start(l consoleLogin, now time.Time) (consoleLogin, err
 	l.code, l.request = consoleLoginCodePrefix+code, request
 	l.created, l.state, l.account = now, consoleLoginPending, 0
 
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-	if ls.byCode == nil {
-		ls.byCode = make(map[string]*consoleLogin)
-		ls.byRequest = make(map[string]*consoleLogin)
-	}
-	for _, old := range ls.byCode {
-		if old.expired(now) {
-			ls.dropLocked(old)
-		}
-	}
-	if len(ls.byCode) >= maxConsoleLogins {
+	if !ls.cap().Add(l.code, now, now.Add(consoleLoginLifetime)) {
 		return consoleLogin{}, errConsoleLoginTooMany
 	}
-	kept := l
-	ls.byCode[kept.code] = &kept
-	ls.byRequest[kept.request] = &kept
-	return kept, nil
+	ctx := context.Background()
+	err = ls.save(ctx, l, now)
+	if err == nil {
+		err = ls.kv().Set(ctx, consoleLoginCodeKey(l.code), l.request, consoleLoginLifetime)
+	}
+	if err != nil {
+		ls.drop(ctx, l)
+		return consoleLogin{}, err
+	}
+	return l, nil
 }
 
 // view is the request with this id, while it lives.
 func (ls *consoleLogins) view(request string, now time.Time) (consoleLogin, bool) {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-	l, ok := ls.byRequest[request]
-	if !ok {
-		return consoleLogin{}, false
+	l, ok, err := ls.load(context.Background(), request, now)
+	if err != nil {
+		log.Printf("[console sign-in] read a request: %v", err)
 	}
-	if l.expired(now) {
-		ls.dropLocked(l)
-		return consoleLogin{}, false
-	}
-	return *l, true
+	return l, ok
 }
 
 // decide allows or declines a pending request for account. check, when
 // not nil, runs before an approval while the request is held, and its
-// error refuses the approval and leaves the request pending.
+// error refuses the approval and leaves the request pending. A decision
+// holds the request with a key that only one decision on any instance
+// gets.
 func (ls *consoleLogins) decide(request string, allow bool, account int64, now time.Time, check func() error) (consoleLogin, error) {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-	l, ok := ls.byRequest[request]
+	ctx := context.Background()
+	l, ok, err := ls.load(ctx, request, now)
+	if err != nil {
+		return consoleLogin{}, err
+	}
 	if !ok {
 		return consoleLogin{}, errConsoleLoginNotFound
 	}
-	if l.expired(now) {
-		ls.dropLocked(l)
-		return consoleLogin{}, errConsoleLoginNotFound
-	}
 	if l.state != consoleLoginPending {
-		return *l, errConsoleLoginNotPending
+		return l, errConsoleLoginNotPending
+	}
+	kv := ls.kv()
+	_, held, err := kv.SetNX(ctx, consoleLoginDecideKey(request), "1", l.left(now))
+	if err != nil {
+		return l, err
+	}
+	if !held {
+		// Another decision holds it: answer with what it made of it
+		if cur, found, _ := ls.load(ctx, request, now); found {
+			l = cur
+		}
+		return l, errConsoleLoginNotPending
 	}
 	if allow && check != nil {
 		if err := check(); err != nil {
-			return *l, err
+			_ = kv.Del(ctx, consoleLoginDecideKey(request))
+			return l, err
 		}
 	}
 	l.state, l.account = consoleLoginDeclined, account
 	if allow {
 		l.state = consoleLoginAllowed
 	}
-	return *l, nil
+	if err := ls.save(ctx, l, now); err != nil {
+		_ = kv.Del(ctx, consoleLoginDecideKey(request))
+		return consoleLogin{}, err
+	}
+	return l, nil
 }
 
 // What a poll finds.
@@ -207,30 +299,51 @@ const (
 )
 
 // poll looks up the request of a poll code for the device id and uuid. A
-// declined or allowed request is gone after the poll that learns it.
+// declined or allowed request is gone after the poll that learns it: the
+// poll takes it from the KV, so of two polls on any instances one gets it.
 func (ls *consoleLogins) poll(code, deviceID, uuid string, now time.Time) (consoleLogin, consoleLoginPoll) {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-	l, ok := ls.byCode[code]
+	ctx := context.Background()
+	kv := ls.kv()
+	request, ok, err := kv.Get(ctx, consoleLoginCodeKey(code))
+	if err != nil {
+		log.Printf("[console sign-in] read a poll code: %v", err)
+	}
 	if !ok {
 		return consoleLogin{}, pollUnknown
 	}
-	if l.expired(now) {
-		ls.dropLocked(l)
+	l, ok, err := ls.load(ctx, request, now)
+	if err != nil {
+		log.Printf("[console sign-in] read a request: %v", err)
+	}
+	if !ok || l.code != code {
 		return consoleLogin{}, pollUnknown
 	}
 	if deviceID == "" || uuid == "" || deviceID != l.deviceID || uuid != l.uuid {
 		return consoleLogin{}, pollMismatch
 	}
+	if l.state == consoleLoginPending {
+		return l, pollWaiting
+	}
+	raw, took, err := kv.Take(ctx, consoleLoginRequestKey(request))
+	if err != nil {
+		log.Printf("[console sign-in] take a request: %v", err)
+	}
+	if !took {
+		return consoleLogin{}, pollUnknown
+	}
+	var st consoleLoginStored
+	if json.Unmarshal([]byte(raw), &st) != nil {
+		return consoleLogin{}, pollUnknown
+	}
+	l = st.login()
+	ls.drop(ctx, l)
 	switch l.state {
 	case consoleLoginDeclined:
-		ls.dropLocked(l)
-		return *l, pollDeclined
+		return l, pollDeclined
 	case consoleLoginAllowed:
-		ls.dropLocked(l)
-		return *l, pollAllowed
+		return l, pollAllowed
 	}
-	return *l, pollWaiting
+	return consoleLogin{}, pollUnknown
 }
 
 // consoleLoginRoutes are the console's routes to read and decide requests.

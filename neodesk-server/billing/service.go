@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 	"github.com/neodeskapp/neodesk/neodesk-server/db"
 	"github.com/neodeskapp/neodesk/neodesk-server/timesync"
 )
@@ -52,6 +54,11 @@ type Service struct {
 	clock         *timesync.Service
 	roundMin      int
 	requireReport bool
+
+	// shared holds the pending relays for the other instances (cluster
+	// mode): signal prepares a relay on one pod, and the relay pairs it on
+	// the pod where its legs meet. nil when the server runs alone.
+	shared cluster.KV
 
 	mu      sync.Mutex
 	pending map[string]*pendingRelay // relayUUID -> meta
@@ -242,8 +249,46 @@ func (s *Service) PrepareRelay(relayUUID, deviceID, operatorID, operatorName str
 		Currency:     contract.Currency,
 		createdAt:    time.Now(),
 	}
+	meta := s.pending[relayUUID]
 	s.mu.Unlock()
+	s.sharePending(relayUUID, meta)
 	return nil
+}
+
+// sharePending hands a pending relay to the other instances.
+func (s *Service) sharePending(relayUUID string, meta *pendingRelay) {
+	if s.shared == nil {
+		return
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return
+	}
+	if err := s.shared.Set(context.Background(), "billing:pend:"+relayUUID, string(raw), pendingRelayTTL); err != nil {
+		log.Printf("[billing] Could not share the pending relay %s: %v", relayUUID, err)
+	}
+}
+
+// SetShared shares pending relays through kv (cluster mode).
+func (s *Service) SetShared(kv cluster.KV) { s.shared = kv }
+
+// takeShared takes a pending relay another instance prepared.
+func (s *Service) takeShared(relayUUID string) (*pendingRelay, bool) {
+	if s.shared == nil {
+		return nil, false
+	}
+	ctx := context.Background()
+	key := "billing:pend:" + relayUUID
+	raw, ok, err := s.shared.Get(ctx, key)
+	if err != nil || !ok {
+		return nil, false
+	}
+	_ = s.shared.DelIf(ctx, key, raw)
+	var meta pendingRelay
+	if json.Unmarshal([]byte(raw), &meta) != nil {
+		return nil, false
+	}
+	return &meta, true
 }
 
 // ActivateRelay starts the authoritative billing session when relay pairs.
@@ -253,12 +298,16 @@ func (s *Service) ActivateRelay(relayUUID string) {
 	}
 	s.mu.Lock()
 	meta, ok := s.pending[relayUUID]
-	if !ok {
-		s.mu.Unlock()
-		return
-	}
 	delete(s.pending, relayUUID)
 	s.mu.Unlock()
+	if ok && s.shared != nil {
+		_ = s.shared.Del(context.Background(), "billing:pend:"+relayUUID)
+	}
+	if !ok {
+		if meta, ok = s.takeShared(relayUUID); !ok {
+			return
+		}
+	}
 
 	contract, err := s.db.GetBillingContract(meta.ContractID)
 	if err != nil || contract == nil {

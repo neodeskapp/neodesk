@@ -452,50 +452,33 @@ func TestExchangeCodeInvalidState(t *testing.T) {
 	}
 }
 
-// TestCleanupStates verifies that expired states are cleaned up.
-func TestCleanupStates(t *testing.T) {
+// TestExpiredStateIsRefused: a state older than its lifetime does not
+// sign in, and it is used up by the try.
+func TestExpiredStateIsRefused(t *testing.T) {
 	cfg := &OIDCConfig{
 		Enabled:          true,
 		ClientID:         "client",
 		AuthorizationURL: "https://idp.example.com/authorize",
+		TokenURL:         "http://localhost/token",
 		RedirectURL:      "http://localhost/callback",
 		Scopes:           "openid",
 	}
 	p := newTestOIDCProvider(t, cfg)
 
-	// Create a state entry
-	_, state, _ := p.BuildAuthURL("/")
-
-	// Verify it exists
-	p.mu.RLock()
-	_, exists := p.states[state]
-	p.mu.RUnlock()
-	if !exists {
-		t.Fatal("state should exist after BuildAuthURL")
+	_, state, err := p.BuildAuthURL("/back")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Manually expire it
-	p.mu.Lock()
-	if s, ok := p.states[state]; ok {
-		s.CreatedAt = time.Now().Add(-20 * time.Minute) // 20 min ago (beyond 15 min TTL)
+	if got := p.GetReturnURL(state); got != "/back" {
+		t.Fatalf("return URL of a new state = %q", got)
 	}
-	p.mu.Unlock()
-
-	// Run cleanup manually (normally runs on ticker)
-	p.mu.Lock()
-	for k, v := range p.states {
-		if time.Since(v.CreatedAt) > 15*time.Minute {
-			delete(p.states, k)
-		}
+	later := time.Now().Add(20 * time.Minute)
+	p.now = func() time.Time { return later }
+	if _, err := p.ExchangeCode(context.Background(), "code", state); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Errorf("an expired state: %v", err)
 	}
-	p.mu.Unlock()
-
-	// Verify it's gone
-	p.mu.RLock()
-	_, exists = p.states[state]
-	p.mu.RUnlock()
-	if exists {
-		t.Error("expired state should have been cleaned up")
+	if got := p.GetReturnURL(state); got != "" {
+		t.Errorf("the state outlived its use: %q", got)
 	}
 }
 

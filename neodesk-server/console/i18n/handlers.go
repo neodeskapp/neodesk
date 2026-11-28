@@ -75,8 +75,25 @@ type Handlers struct {
 	// Logf writes error lines. log.Printf when nil.
 	Logf func(format string, args ...any)
 
+	// OnChange hears that language code was uploaded or deleted, so the
+	// other instances of the installation read it again; nil for none.
+	OnChange func(code string)
+
 	stringsMu sync.Mutex
 	cache     map[string]*stringsEntry
+}
+
+// Reload reads the language files again and drops the strings of code:
+// another instance changed them.
+func (h *Handlers) Reload(code string) {
+	h.Bundle.Load()
+	h.forgetStrings(code)
+}
+
+func (h *Handlers) changed(code string) {
+	if h.OnChange != nil {
+		h.OnChange(code)
+	}
 }
 
 func (h *Handlers) now() time.Time {
@@ -234,6 +251,7 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.forgetStrings(name)
+	h.changed(name)
 	if h.Audit != nil {
 		if err := h.Audit(r, "language_uploaded", "Language "+name+" uploaded"); err != nil {
 			crash(err.Error())
@@ -259,6 +277,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.forgetStrings(code)
+	h.changed(code)
 	if h.Audit != nil {
 		if err := h.Audit(r, "language_deleted", "Language "+code+" deleted"); err != nil {
 			h.logf("Delete language error: %v", err)

@@ -279,6 +279,29 @@ func (m *Map) movedHandler() func(id, from string) {
 	return m.onMoved
 }
 
+// SetRemoteRemoveHandler sets who asks pod owner to remove peer id when
+// Remove is called for a peer another pod holds (the signal server calls
+// that pod).
+func (m *Map) SetRemoteRemoveHandler(h func(owner, id string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onRemoteRemove = h
+}
+
+// removeRemoteLocked hands the removal of id to the pod that holds it. It
+// runs with m.mu held and asks on its own goroutine.
+func (m *Map) removeRemoteLocked(id string) {
+	ds, h := m.dir, m.onRemoteRemove
+	if ds == nil || h == nil {
+		return
+	}
+	go func() {
+		if e, ok := ds.d.Lookup(id); ok && e != nil && e.Owner != "" && e.Owner != ds.self {
+			h(e.Owner, id)
+		}
+	}()
+}
+
 // dropStale removes the local entry of id, which another pod holds a newer
 // registration of, without withdrawing it (the record is that pod's).
 func (m *Map) dropStale(id string) {

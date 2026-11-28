@@ -14,6 +14,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -145,8 +146,8 @@ func (s *Server) handleChatSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Deliver to the target device over CDAP if it is connected. The message is
 	// already persisted; CDAP delivery is best-effort for online agents.
-	if body.ToID != "" && s.cdapGw != nil && s.cdapGw.IsConnected(body.ToID) {
-		if err := s.cdapGw.SendChatToDevice(r.Context(), body.ToID, body.FromID, body.FromName, body.Text); err != nil {
+	if body.ToID != "" {
+		if _, err := s.cdapChat(r.Context(), body.ToID, body.FromID, body.FromName, body.Text); err != nil {
 			log.Printf("[chat] CDAP delivery to %s failed: %v", body.ToID, err)
 		}
 	}
@@ -265,7 +266,8 @@ func (s *Server) chatPeerOnline(p *db.Peer) bool {
 	if !p.LastOnline.IsZero() && time.Since(p.LastOnline) <= config.RegTimeout {
 		return true
 	}
-	return (s.cdapGw != nil && s.cdapGw.IsConnected(p.ID)) || (s.meshGw != nil && s.meshGw.IsConnected(p.ID))
+	ctx := context.Background()
+	return s.deviceConnectedAnywhere(ctx, "cdap", p.ID) || s.deviceConnectedAnywhere(ctx, "mesh", p.ID)
 }
 
 // handleChatContacts returns the chat contacts of a device: the operators

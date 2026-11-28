@@ -27,6 +27,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/neodeskapp/neodesk/neodesk-server/cluster"
 )
 
 // OIDCConfig holds all OIDC provider settings.
@@ -157,9 +159,9 @@ func setOIDCDiscoveryRetryIntervalForTest(d time.Duration) (restore func()) {
 	return func() { oidcDiscoveryRetryIntervalNs.Store(prev) }
 }
 
-// maxOIDCPending caps the sign-ins in progress the provider keeps, each of
-// its maps of states and of desktop client starts. The starts are public,
-// so without a cap every call would add an entry until the cleanup.
+// maxOIDCPending caps the sign-ins in progress one instance keeps, each of
+// the states and of the desktop client starts. The starts are public, so
+// without a cap every call would add an entry until it expires.
 const maxOIDCPending = 4096
 
 // Longest fields a start may store, in bytes.
@@ -172,6 +174,15 @@ const (
 	maxOIDCDeviceType  = 32
 	oidcStateLifetime  = 15 * time.Minute
 	oidcClientLifetime = 10 * time.Minute
+	// oidcCodeLifetime is how long a one-time code for the panel lives.
+	oidcCodeLifetime = 60 * time.Second
+)
+
+// The keys of the provider's entries in its KV.
+const (
+	oidcStateKey  = "oidc:state:"
+	oidcCodeKey   = "oidc:code:"
+	oidcClientKey = "oidc:client:"
 )
 
 // ErrOIDCTooManyPending refuses a start while maxOIDCPending sign-ins are in
@@ -181,35 +192,88 @@ var ErrOIDCTooManyPending = errors.New("too many single sign-ons in progress")
 // ErrOIDCFieldTooLong refuses a start with a field over its limit.
 var ErrOIDCFieldTooLong = errors.New("single sign-on start field too long")
 
-// OIDCProvider manages OIDC authentication.
+// OIDCProvider manages OIDC authentication. The sign-ins in progress (the
+// states, the one-time codes for the panel and the desktop client starts)
+// are in a KV, JSON-encoded under oidcStateKey, oidcCodeKey and
+// oidcClientKey, so the callback and the polls can land on another
+// instance than the start (SetKV). Each expires with its lifetime.
 type OIDCProvider struct {
-	mu            sync.RWMutex
-	discoverMu    sync.Mutex // serializes discover() (boot / UpdateConfig / retry)
-	config        *OIDCConfig
-	discovery     *oidcDiscovery
-	states        map[string]*oidcState         // state → oidcState
-	codes         map[string]*oidcAuthCode      // one-time auth codes for panel exchange
-	clientPending map[string]*ClientOIDCPending // state/code → RustDesk client OIDC pending
-	client        *http.Client
-	stop          chan struct{}
-	stopOnce      sync.Once
+	mu         sync.RWMutex
+	discoverMu sync.Mutex // serializes discover() (boot / UpdateConfig / retry)
+	config     *OIDCConfig
+	discovery  *oidcDiscovery
+	kv         cluster.KV
+	// stateCap and clientCap count the states and the client starts this
+	// instance keeps (maxOIDCPending)
+	stateCap  *cluster.LocalCap
+	clientCap *cluster.LocalCap
+	// now is the clock of the entries' ages; tests move it
+	now      func() time.Time
+	client   *http.Client
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 // NewOIDCProvider creates a new OIDC provider with the given configuration.
+// It keeps its sign-ins in progress in memory until SetKV.
 func NewOIDCProvider(cfg *OIDCConfig) *OIDCProvider {
 	p := &OIDCProvider{
-		config:        cfg,
-		states:        make(map[string]*oidcState),
-		codes:         make(map[string]*oidcAuthCode),
-		clientPending: make(map[string]*ClientOIDCPending),
-		client:        &http.Client{Timeout: 15 * time.Second},
-		stop:          make(chan struct{}),
+		config:    cfg,
+		kv:        cluster.NewMemKV(),
+		stateCap:  cluster.NewLocalCap(maxOIDCPending),
+		clientCap: cluster.NewLocalCap(maxOIDCPending),
+		now:       time.Now,
+		client:    &http.Client{Timeout: 15 * time.Second},
+		stop:      make(chan struct{}),
 	}
 	// Immediate discover + periodic retry while discovery remains nil.
 	go p.discoveryRetryLoop()
-	// Start state cleanup goroutine
-	go p.cleanupStates()
 	return p
+}
+
+// SetKV makes the provider keep its sign-ins in progress in kv, which the
+// instances of an installation share. Call it before the provider serves.
+func (p *OIDCProvider) SetKV(kv cluster.KV) {
+	if p == nil || kv == nil {
+		return
+	}
+	p.mu.Lock()
+	p.kv = kv
+	p.mu.Unlock()
+}
+
+func (p *OIDCProvider) store() cluster.KV {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.kv
+}
+
+// putJSON stores v under key for ttl.
+func (p *OIDCProvider) putJSON(key string, v any, ttl time.Duration) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return p.store().Set(context.Background(), key, string(raw), ttl)
+}
+
+// readJSON reads key into v; take removes it in the same step. It is
+// false when there is no such entry or it cannot be read.
+func (p *OIDCProvider) readJSON(key string, v any, take bool) bool {
+	kv := p.store()
+	var raw string
+	var ok bool
+	var err error
+	if take {
+		raw, ok, err = kv.Take(context.Background(), key)
+	} else {
+		raw, ok, err = kv.Get(context.Background(), key)
+	}
+	if err != nil {
+		log.Printf("[OIDC] read a sign-in in progress: %v", err)
+		return false
+	}
+	return ok && json.Unmarshal([]byte(raw), v) == nil
 }
 
 // Close stops background discovery/cleanup goroutines. Safe to call multiple times.
@@ -421,24 +485,23 @@ func (p *OIDCProvider) BuildClientAuthURL(clientID, clientUUID string, device Cl
 	if err != nil {
 		return "", "", err
 	}
-	p.mu.Lock()
-	if len(p.clientPending) >= maxOIDCPending {
-		dropExpired(p.clientPending, oidcClientLifetime, func(c *ClientOIDCPending) time.Time { return c.CreatedAt })
-	}
-	if len(p.clientPending) >= maxOIDCPending {
-		delete(p.states, code)
-		p.mu.Unlock()
+	now := p.now()
+	if !p.clientCap.Add(code, now, now.Add(oidcClientLifetime)) {
+		p.dropState(code)
 		return "", "", ErrOIDCTooManyPending
 	}
-	p.clientPending[code] = &ClientOIDCPending{
+	if err := p.putJSON(oidcClientKey+code, &ClientOIDCPending{
 		ClientID:   clientID,
 		ClientUUID: clientUUID,
 		DeviceName: device.Name,
 		DeviceOS:   device.OS,
 		DeviceType: device.Type,
-		CreatedAt:  time.Now(),
+		CreatedAt:  now,
+	}, oidcClientLifetime); err != nil {
+		p.clientCap.Remove(code)
+		p.dropState(code)
+		return "", "", fmt.Errorf("store the sign-in: %w", err)
 	}
-	p.mu.Unlock()
 	return authURL, code, nil
 }
 
@@ -467,9 +530,10 @@ func (p *OIDCProvider) buildAuthURL(base oidcState) (string, string, error) {
 		return "", "", fmt.Errorf("generate nonce: %w", err)
 	}
 
+	now := p.now()
 	stateEntry := &oidcState{
 		Nonce:      nonce,
-		CreatedAt:  time.Now(),
+		CreatedAt:  now,
 		ReturnURL:  base.ReturnURL,
 		Flow:       base.Flow,
 		ClientID:   base.ClientID,
@@ -511,28 +575,24 @@ func (p *OIDCProvider) buildAuthURL(base oidcState) (string, string, error) {
 	}
 
 	// Store state
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.states) >= maxOIDCPending {
-		dropExpired(p.states, oidcStateLifetime, func(s *oidcState) time.Time { return s.CreatedAt })
-	}
-	if len(p.states) >= maxOIDCPending {
+	if !p.stateCap.Add(state, now, now.Add(oidcStateLifetime)) {
 		return "", "", ErrOIDCTooManyPending
 	}
-	p.states[state] = stateEntry
+	if err := p.putJSON(oidcStateKey+state, stateEntry, oidcStateLifetime); err != nil {
+		p.stateCap.Remove(state)
+		return "", "", fmt.Errorf("store state: %w", err)
+	}
 
 	return authEP + "?" + params.Encode(), state, nil
 }
 
 // ExchangeCode exchanges an authorization code for tokens and user info.
 func (p *OIDCProvider) ExchangeCode(ctx context.Context, code, state string) (*OIDCResult, error) {
-	// Validate and consume state
-	p.mu.Lock()
-	stateEntry, ok := p.states[state]
-	if ok {
-		delete(p.states, state)
-	}
-	p.mu.Unlock()
+	// Validate and consume state: of two callbacks with one state, on any
+	// instances, one gets it
+	stateEntry := &oidcState{}
+	ok := state != "" && p.readJSON(oidcStateKey+state, stateEntry, true)
+	p.stateCap.Remove(state)
 
 	if !ok {
 		return nil, fmt.Errorf("invalid or expired state parameter")
@@ -548,7 +608,7 @@ func (p *OIDCProvider) ExchangeCode(ctx context.Context, code, state string) (*O
 	oauthState := state
 
 	// Check state age (10 minute max)
-	if time.Since(stateEntry.CreatedAt) > 10*time.Minute {
+	if p.now().Sub(stateEntry.CreatedAt) > 10*time.Minute {
 		return nil, fmt.Errorf("state parameter expired")
 	}
 
@@ -753,12 +813,19 @@ func audienceHas(aud interface{}, clientID string) bool {
 
 // GetReturnURL retrieves the return URL stored with a state parameter.
 func (p *OIDCProvider) GetReturnURL(state string) string {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if entry, ok := p.states[state]; ok {
+	var entry oidcState
+	if state != "" && p.readJSON(oidcStateKey+state, &entry, false) {
 		return entry.ReturnURL
 	}
 	return ""
+}
+
+// dropState removes a state this instance stored.
+func (p *OIDCProvider) dropState(state string) {
+	p.stateCap.Remove(state)
+	if err := p.store().Del(context.Background(), oidcStateKey+state); err != nil {
+		log.Printf("[OIDC] drop a state: %v", err)
+	}
 }
 
 // fetchUserInfo calls the UserInfo endpoint with an access token.
@@ -842,57 +909,32 @@ func (p *OIDCProvider) resolveRoleWithSource(groups []string) (string, bool) {
 	return bestRole, true
 }
 
-// dropExpired deletes the entries of m older than lifetime. The caller
-// holds p.mu.
-func dropExpired[V any](m map[string]V, lifetime time.Duration, created func(V) time.Time) {
-	now := time.Now()
-	for k, v := range m {
-		if now.Sub(created(v)) > lifetime {
-			delete(m, k)
-		}
-	}
-}
-
-// cleanupStates removes expired state entries every 5 minutes.
-// Exits when Close() is called.
-func (p *OIDCProvider) cleanupStates() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-p.stop:
-			return
-		case <-ticker.C:
-			p.mu.Lock()
-			dropExpired(p.states, oidcStateLifetime, func(s *oidcState) time.Time { return s.CreatedAt })
-			// Auth codes are short-lived (60s); anything older is stale.
-			dropExpired(p.codes, 60*time.Second, func(c *oidcAuthCode) time.Time { return c.CreatedAt })
-			// Client OIDC pending (auth + poll window ~3–10 min).
-			dropExpired(p.clientPending, oidcClientLifetime, func(c *ClientOIDCPending) time.Time { return c.CreatedAt })
-			p.mu.Unlock()
-		}
-	}
-}
-
 // CompleteClientPending marks a RustDesk client OIDC poll code as authenticated.
 func (p *OIDCProvider) CompleteClientPending(code string, userID int64, username, role string) bool {
 	if code == "" || username == "" {
 		return false
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	entry, ok := p.clientPending[code]
-	if !ok {
+	var entry ClientOIDCPending
+	if !p.readJSON(oidcClientKey+code, &entry, false) {
 		return false
 	}
-	if time.Since(entry.CreatedAt) > 10*time.Minute {
-		delete(p.clientPending, code)
+	age := p.now().Sub(entry.CreatedAt)
+	if age > 10*time.Minute {
+		p.FailClientPending(code)
 		return false
 	}
 	entry.UserID = userID
 	entry.Username = username
 	entry.Role = role
 	entry.Authed = true
+	left := oidcClientLifetime - age
+	if left < time.Second {
+		left = time.Second
+	}
+	if err := p.putJSON(oidcClientKey+code, &entry, left); err != nil {
+		log.Printf("[OIDC] mark a client sign-in done: %v", err)
+		return false
+	}
 	return true
 }
 
@@ -901,36 +943,32 @@ func (p *OIDCProvider) PeekClientPending(code string) *ClientOIDCPending {
 	if code == "" {
 		return nil
 	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	entry, ok := p.clientPending[code]
-	if !ok {
+	var entry ClientOIDCPending
+	if !p.readJSON(oidcClientKey+code, &entry, false) {
 		return nil
 	}
-	if time.Since(entry.CreatedAt) > 10*time.Minute {
+	if p.now().Sub(entry.CreatedAt) > 10*time.Minute {
 		return nil
 	}
-	cp := *entry
-	return &cp
+	return &entry
 }
 
-// ConsumeClientPending atomically retrieves and deletes an authenticated client pending entry.
+// ConsumeClientPending atomically retrieves and deletes an authenticated client
+// pending entry: of two polls on any instances, one gets it.
 func (p *OIDCProvider) ConsumeClientPending(code string) *ClientOIDCPending {
 	if code == "" {
 		return nil
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	entry, ok := p.clientPending[code]
+	var entry ClientOIDCPending
+	ok := p.readJSON(oidcClientKey+code, &entry, true)
+	p.clientCap.Remove(code)
 	if !ok {
 		return nil
 	}
-	delete(p.clientPending, code)
-	if time.Since(entry.CreatedAt) > 10*time.Minute || !entry.Authed {
+	if p.now().Sub(entry.CreatedAt) > 10*time.Minute || !entry.Authed {
 		return nil
 	}
-	cp := *entry
-	return &cp
+	return &entry
 }
 
 // FailClientPending removes a pending client OIDC entry (e.g. after IdP error).
@@ -938,9 +976,10 @@ func (p *OIDCProvider) FailClientPending(code string) {
 	if code == "" {
 		return
 	}
-	p.mu.Lock()
-	delete(p.clientPending, code)
-	p.mu.Unlock()
+	p.clientCap.Remove(code)
+	if err := p.store().Del(context.Background(), oidcClientKey+code); err != nil {
+		log.Printf("[OIDC] drop a client sign-in: %v", err)
+	}
 }
 
 // ClientLoginOptionToken returns the login-options string stock RustDesk expects (oidc/<name>).
@@ -1038,35 +1077,32 @@ func (p *OIDCProvider) StoreAuthCodeForState(token, username, role, returnURL, p
 	if err != nil {
 		return "", err
 	}
-	p.mu.Lock()
-	p.codes[code] = &oidcAuthCode{
+	if err := p.putJSON(oidcCodeKey+code, &oidcAuthCode{
 		Token:     token,
 		Username:  username,
 		Role:      role,
 		ReturnURL: returnURL,
 		Picture:   SanitizeOIDCPicture(picture),
 		State:     state,
-		CreatedAt: time.Now(),
+		CreatedAt: p.now(),
+	}, oidcCodeLifetime); err != nil {
+		return "", fmt.Errorf("store the code: %w", err)
 	}
-	p.mu.Unlock()
 	return code, nil
 }
 
-// ConsumeAuthCode atomically retrieves and deletes a one-time auth code.
-// Returns the stored entry or nil if the code is unknown, already used, or
-// older than 60 seconds.
+// ConsumeAuthCode atomically retrieves and deletes a one-time auth code,
+// on all instances that share the KV. Returns the stored entry or nil if
+// the code is unknown, already used, or older than 60 seconds.
 func (p *OIDCProvider) ConsumeAuthCode(code string) *oidcAuthCode {
 	if code == "" {
 		return nil
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	entry, ok := p.codes[code]
-	if !ok {
+	entry := &oidcAuthCode{}
+	if !p.readJSON(oidcCodeKey+code, entry, true) {
 		return nil
 	}
-	delete(p.codes, code)
-	if time.Since(entry.CreatedAt) > 60*time.Second {
+	if p.now().Sub(entry.CreatedAt) > oidcCodeLifetime {
 		return nil
 	}
 	return entry

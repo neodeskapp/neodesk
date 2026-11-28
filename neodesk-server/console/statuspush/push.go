@@ -380,11 +380,18 @@ func (s *Service) Run(ctx context.Context) {
 // Handle pushes one event of the bus: the frame the API server's event
 // socket would have sent, parsed.
 func (s *Service) Handle(ctx context.Context, frame any) {
+	remote := isRemote(frame)
+	if remote {
+		// The mark stays out of what the sockets get
+		frame.(*goapi.Object).Delete("remote")
+	}
 	out, ok := transform(frame, s.opts.Now)
 	if !ok {
 		return
 	}
-	if out.cascade != nil && s.opts.Cascade != nil {
+	// The instance that published a changed id carries it into the
+	// tables; the others only push it to their sockets
+	if out.cascade != nil && s.opts.Cascade != nil && !remote {
 		s.opts.Cascade(ctx, out.cascade[0], out.cascade[1])
 	}
 	text, err := stringify(out.message)
@@ -396,4 +403,15 @@ func (s *Service) Handle(ctx context.Context, frame any) {
 	} else {
 		s.broadcast(ctx, s.status, out.message, text)
 	}
+}
+
+// isRemote reports whether frame came from another instance of the
+// installation (goapi marks it "remote").
+func isRemote(frame any) bool {
+	o, ok := frame.(*goapi.Object)
+	if !ok || o == nil {
+		return false
+	}
+	r, _ := o.Get("remote").(bool)
+	return r
 }
