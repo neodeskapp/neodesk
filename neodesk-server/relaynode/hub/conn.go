@@ -127,13 +127,22 @@ func (nc *nodeConn) handle(f wire.Frame) {
 		now := h.cfg.Now()
 		h.mu.Lock()
 		n := h.state(nc.nodeID)
-		n.active++
-		if t := n.tickets[m.UUID]; t != nil {
+		// Only a session this node holds a ticket for: billing and the
+		// session record must never follow another node's (or another
+		// organization's) uuid
+		t := n.tickets[m.UUID]
+		known := t != nil && !t.live
+		if known {
+			n.active++
 			t.live = true
 			t.since = now
+			h.sessions[m.UUID] = nc.nodeID
 		}
-		h.sessions[m.UUID] = nc.nodeID
 		h.mu.Unlock()
+		if !known {
+			nc.foreignSession("started", m.UUID)
+			return
+		}
 		if h.cfg.Events != nil {
 			h.cfg.Events.NodeSessionStarted(nc.nodeID, m.UUID)
 		}
@@ -144,12 +153,21 @@ func (nc *nodeConn) handle(f wire.Frame) {
 		}
 		h.mu.Lock()
 		n := h.state(nc.nodeID)
-		if n.active > 0 {
-			n.active--
+		_, known := n.tickets[m.UUID]
+		if known {
+			if n.active > 0 {
+				n.active--
+			}
+			delete(n.tickets, m.UUID)
+			if h.sessions[m.UUID] == nc.nodeID {
+				delete(h.sessions, m.UUID)
+			}
 		}
-		delete(n.tickets, m.UUID)
-		delete(h.sessions, m.UUID)
 		h.mu.Unlock()
+		if !known {
+			nc.foreignSession("ended", m.UUID)
+			return
+		}
 		if h.cfg.Events != nil {
 			h.cfg.Events.NodeSessionEnded(nc.nodeID, m.UUID, m.Up, m.Down)
 		}
@@ -171,4 +189,11 @@ func (nc *nodeConn) handle(f wire.Frame) {
 	default:
 		// probed (phase 2) and types of newer nodes
 	}
+}
+
+// foreignSession logs and audits a started or ended report for a uuid the
+// node holds no ticket for, which the hub ignores.
+func (nc *nodeConn) foreignSession(kind, uuid string) {
+	nc.h.cfg.Logf("[nodes] Node %s reported %s for uuid %s without a ticket; ignored", nc.nodeID, kind, uuid)
+	nc.h.audit("relay_node.unknown_session", map[string]string{"node_id": nc.nodeID, "report": kind, "uuid": uuid})
 }

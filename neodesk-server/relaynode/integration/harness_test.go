@@ -324,6 +324,9 @@ type nodeOpts struct {
 	// relayFront makes peers dial a capturing proxy in front of the relay
 	relayFront bool
 	relayProxy *relayProxy // set by startNode when relayFront
+	// publicAddr is the public address the node reports, its relay
+	// address when empty
+	publicAddr string
 }
 
 // startNode enrolls a relay node with a token of the site and waits until
@@ -350,13 +353,17 @@ func (s *server) startNode(siteID string, o *nodeOpts) *node {
 		o.relayProxy = startRelayProxy(t, relayAddr)
 		relayAddr = o.relayProxy.addr()
 	}
+	publicAddr := relayAddr
+	if o.publicAddr != "" {
+		publicAddr = o.publicAddr
+	}
 	rcfg := config.DefaultConfig()
 	rcfg.RelayPort = relayPort
 	rcfg.KeyFile = filepath.Join(dataDir, "id_ed25519")
 	logs := &logBuf{}
 	a, err := agent.New(agent.Config{
 		Join: s.joinString(siteID, controlAddr), DataDir: dataDir,
-		LanAddr: relayAddr, PublicAddr: relayAddr,
+		LanAddr: relayAddr, PublicAddr: publicAddr,
 		Relay: rcfg, Version: "integration", Logf: logs.Logf,
 		BackoffMin: 50 * time.Millisecond, BackoffMax: 200 * time.Millisecond,
 	})

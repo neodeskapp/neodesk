@@ -8,6 +8,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -438,6 +439,59 @@ func (s *Service) Route(initiatorID string, initiatorAddr net.IP, targetID strin
 		}
 	}
 	return NodeRoute{}
+}
+
+// NodeForAddr is the online node a target already dials at addr (the
+// relay it names in its RelayResponse), when that node may relay this
+// pair: both peers in the same organization, the node at the site of one
+// of them, and addr the address the target reaches it at. targetAddr
+// and initiatorAddr are what each peer dials; ok is false otherwise, so
+// a relay address of another organization's node is never used.
+func (s *Service) NodeForAddr(initiatorID string, initiatorIP net.IP, targetID string, targetIP net.IP, addr string) (node *db.RelayNode, initiatorAddr, targetAddr string, ok bool) {
+	addr = strings.TrimSpace(addr)
+	if initiatorID == "" || targetID == "" || addr == "" {
+		return nil, "", "", false
+	}
+	snap := s.snapshot()
+	if snap == nil {
+		return nil, "", "", false
+	}
+	iOrg, ok1 := s.orgOf(initiatorID)
+	tOrg, ok2 := s.orgOf(targetID)
+	if !ok1 || !ok2 || iOrg != tOrg {
+		return nil, "", "", false
+	}
+	iSite := s.resolve(snap, initiatorID, iOrg, initiatorIP)
+	tSite := s.resolve(snap, targetID, tOrg, targetIP)
+	if iSite == nil || tSite == nil {
+		return nil, "", "", false
+	}
+	s.mu.Lock()
+	live := s.liveness
+	s.mu.Unlock()
+	if live == nil {
+		return nil, "", "", false
+	}
+	iInside := insideSite(snap, iSite.ID, initiatorIP)
+	tInside := insideSite(snap, tSite.ID, targetIP)
+	siteIDs := []string{tSite.ID}
+	if iSite.ID != tSite.ID {
+		siteIDs = append(siteIDs, iSite.ID)
+	}
+	for _, siteID := range siteIDs {
+		for _, n := range onlineNodes(snap, live, siteID) {
+			ta := reachAddr(n, tSite.ID, tInside, IsPrivate(targetIP))
+			if ta == "" || !strings.EqualFold(ta, addr) {
+				continue
+			}
+			ia := reachAddr(n, iSite.ID, iInside, IsPrivate(initiatorIP))
+			if ia == "" {
+				continue
+			}
+			return n, ia, ta, true
+		}
+	}
+	return nil, "", "", false
 }
 
 // onlineNodes returns copies of the site's online nodes, fewest active

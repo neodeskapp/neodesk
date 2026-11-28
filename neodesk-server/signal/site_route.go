@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/neodeskapp/neodesk/neodesk-server/relay"
@@ -20,11 +21,12 @@ type NodeRelay struct {
 }
 
 // SiteRouter finds relay node routes. NodeRoute is asked for every
-// session; NodeForAddr maps a relay address a peer already dials (the
-// RelayResponse a target sends after a punch hole) back to its node.
+// session; NodeForAddr maps a relay address the target already dials (the
+// RelayResponse it sends after a punch hole) back to its node, and only
+// to a node that may relay this pair.
 type SiteRouter interface {
 	NodeRoute(initiatorID string, initiatorIP net.IP, targetID string, targetIP net.IP) (NodeRelay, bool)
-	NodeForAddr(addr string) (NodeRelay, bool)
+	NodeForAddr(addr, initiatorID string, initiatorIP net.IP, targetID string, targetIP net.IP) (NodeRelay, bool)
 }
 
 // SetSiteRouter turns relay node routing on; nil turns it off.
@@ -48,9 +50,6 @@ func (s *Server) nodeRoute(req relayRouteRequest) (NodeRelay, bool) {
 	if router == nil || req.noNodes {
 		return NodeRelay{}, false
 	}
-	if req.relayHint != "" {
-		return router.NodeForAddr(req.relayHint)
-	}
 	if req.initiatorID == "" || req.targetID == "" {
 		return NodeRelay{}, false
 	}
@@ -61,7 +60,13 @@ func (s *Server) nodeRoute(req relayRouteRequest) (NodeRelay, bool) {
 	if initiatorAddr == nil || targetAddr == nil {
 		return NodeRelay{}, false
 	}
-	route, ok := router.NodeRoute(req.initiatorID, initiatorAddr.IP, req.targetID, targetAddr.IP)
+	var route NodeRelay
+	var ok bool
+	if req.relayHint != "" {
+		route, ok = router.NodeForAddr(req.relayHint, req.initiatorID, initiatorAddr.IP, req.targetID, targetAddr.IP)
+	} else {
+		route, ok = router.NodeRoute(req.initiatorID, initiatorAddr.IP, req.targetID, targetAddr.IP)
+	}
 	if !ok {
 		return NodeRelay{}, false
 	}
@@ -122,3 +127,21 @@ func RelayVia(uuid string) string {
 
 // ForgetRelayVia drops the entry of an ended session.
 func ForgetRelayVia(uuid string) { relayVia.Delete(uuid) }
+
+// IsOwnRelay reports whether addr is one of the relay addresses this
+// server hands out.
+func (s *Server) IsOwnRelay(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return false
+	}
+	if strings.EqualFold(addr, s.getRelayServer()) {
+		return true
+	}
+	for _, r := range s.cfg.GetRelayServers() {
+		if strings.EqualFold(addr, strings.TrimSpace(r)) {
+			return true
+		}
+	}
+	return false
+}

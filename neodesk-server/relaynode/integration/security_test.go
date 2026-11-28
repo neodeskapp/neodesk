@@ -272,3 +272,37 @@ func (c *bytesConn) Read(p []byte) (int, error)      { return c.r.Read(p) }
 func (c *bytesConn) SetReadDeadline(time.Time) error { return nil }
 func (c *bytesConn) SetDeadline(time.Time) error     { return nil }
 func (c *bytesConn) RemoteAddr() net.Addr            { return &net.TCPAddr{} }
+
+// TestANodeGetsNoSessionsOutsideItsSite: the relay address a target names
+// maps to a node only for peers that node may relay, and a node that
+// reports the central relay's address as its own loses that address, so
+// sessions meant for the central relay never reach it.
+func TestANodeGetsNoSessionsOutsideItsSite(t *testing.T) {
+	s := newServer(t)
+	siteA := s.site("Site A", "10.1.0.0/16")
+	a := s.startNode(siteA, &nodeOpts{publicAddr: s.relayAddr})
+	ini, tgt := newDevice("INI"), newDevice("TGT")
+	lo := net.IPv4(127, 0, 0, 1)
+
+	if _, ok := s.glue.NodeForAddr(a.relayAddr, ini.id, lo, tgt.id, lo); ok {
+		t.Fatal("peers at no site got node A by its relay address")
+	}
+	if _, ok := s.glue.NodeForAddr(s.relayAddr, ini.id, lo, tgt.id, lo); ok {
+		t.Fatal("the central relay's address mapped to node A")
+	}
+	n, err := s.db.GetRelayNode(a.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.PublicAddr == s.relayAddr {
+		t.Fatalf("node A kept the central relay's address %q", n.PublicAddr)
+	}
+
+	// Peers at a site get its node by the address they reach it at
+	siteB := s.site("Site B", "10.2.0.0/16")
+	b := s.startNode(siteB, nil)
+	s.pin(siteB, ini, tgt)
+	if r, ok := s.glue.NodeForAddr(b.relayAddr, ini.id, lo, tgt.id, lo); !ok || r.Via != "node:"+b.id {
+		t.Fatalf("peers at site B got %+v, %v; want node B", r, ok)
+	}
+}

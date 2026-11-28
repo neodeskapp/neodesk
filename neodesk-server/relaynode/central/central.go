@@ -34,6 +34,19 @@ type Glue struct {
 	// the control listener's port, for the enrollment string.
 	Pin         string
 	ControlPort int
+	// OwnRelay reports whether addr is a relay address of this server. A
+	// node that reports one of those as its own address loses it, so no
+	// session meant for the central relay can be routed to it.
+	OwnRelay func(addr string) bool
+}
+
+// nodeAddr is addr unless it is one of the server's own relay addresses.
+func (g *Glue) nodeAddr(nodeID, addr string) string {
+	if addr == "" || g.OwnRelay == nil || !g.OwnRelay(addr) {
+		return addr
+	}
+	g.Audit("relay_node.address_refused", map[string]string{"node_id": nodeID, "addr": addr})
+	return ""
 }
 
 var defaultGlue atomic.Pointer[Glue]
@@ -74,7 +87,7 @@ func (g *Glue) GetRelayNodeByKey(publicKey string) (*hub.Node, error) {
 func (g *Glue) CreateRelayNode(n *hub.Node) error {
 	err := g.DB.CreateRelayNode(&db.RelayNode{
 		ID: n.ID, SiteID: n.SiteID, Name: n.Name, PublicKey: n.PublicKey,
-		LANAddr: n.LanAddr, PublicAddr: n.PublicAddr, Version: n.Version,
+		LANAddr: g.nodeAddr(n.ID, n.LanAddr), PublicAddr: g.nodeAddr(n.ID, n.PublicAddr), Version: n.Version,
 		CreatedAt: n.CreatedAt, LastSeen: &n.CreatedAt,
 	})
 	if err == nil {
@@ -85,7 +98,7 @@ func (g *Glue) CreateRelayNode(n *hub.Node) error {
 
 // UpdateRelayNodeState records what a node said in its hello.
 func (g *Glue) UpdateRelayNodeState(id, version, lanAddr, publicAddr string, _ time.Time) error {
-	return g.Sites.UpdateNodeState(id, version, lanAddr, publicAddr)
+	return g.Sites.UpdateNodeState(id, version, g.nodeAddr(id, lanAddr), g.nodeAddr(id, publicAddr))
 }
 
 // GetSite returns the node's site, nil when the site or its organization
@@ -164,26 +177,18 @@ func (g *Glue) NodeRoute(initiatorID string, initiatorIP net.IP, targetID string
 	return signal.NodeRelay{}, false
 }
 
-// NodeForAddr maps a relay address a peer already dials to its node.
-func (g *Glue) NodeForAddr(addr string) (signal.NodeRelay, bool) {
-	addr = strings.TrimSpace(addr)
-	if g.Hub == nil || addr == "" {
+// NodeForAddr maps the relay address a target already dials to its
+// node, only when the sites service says that node may relay this pair
+// (same organization, a site of one of the peers).
+func (g *Glue) NodeForAddr(addr, initiatorID string, initiatorIP net.IP, targetID string, targetIP net.IP) (signal.NodeRelay, bool) {
+	if g.Hub == nil {
 		return signal.NodeRelay{}, false
 	}
-	nodes, err := g.DB.ListRelayNodes("")
-	if err != nil {
+	n, ia, ta, ok := g.Sites.NodeForAddr(initiatorID, initiatorIP, targetID, targetIP, addr)
+	if !ok || !g.Hub.Online(n.ID) {
 		return signal.NodeRelay{}, false
 	}
-	for i := range nodes {
-		n := &nodes[i]
-		if n.RevokedAt != nil || !g.Hub.Online(n.ID) {
-			continue
-		}
-		if strings.EqualFold(n.LANAddr, addr) || strings.EqualFold(n.PublicAddr, addr) {
-			return signal.NodeRelay{Addr: addr, TargetAddr: addr, Tickets: g.Hub.Tickets(n.ID), Via: "node:" + n.ID}, true
-		}
-	}
-	return signal.NodeRelay{}, false
+	return signal.NodeRelay{Addr: ia, TargetAddr: ta, Tickets: g.Hub.Tickets(n.ID), Via: "node:" + n.ID}, true
 }
 
 // RevokeForPeer drops a banned peer's unclaimed tickets on every node.

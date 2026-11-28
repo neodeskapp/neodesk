@@ -63,6 +63,7 @@ func Start(ctx context.Context, cfg Config) (*Glue, error) {
 		}
 	})
 	if cfg.Signal != nil {
+		glue.OwnRelay = cfg.Signal.IsOwnRelay
 		cfg.Signal.SetSiteRouter(glue)
 	}
 	return glue, nil

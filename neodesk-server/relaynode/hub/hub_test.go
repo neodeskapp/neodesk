@@ -309,3 +309,78 @@ func TestControlPort(t *testing.T) {
 		t.Fatal("x accepted")
 	}
 }
+
+// ackAll answers every authorize on c with ok, until c closes.
+func ackAll(c *wire.Conn) {
+	go func() {
+		for {
+			f, err := c.Read(10 * time.Second)
+			if err != nil {
+				return
+			}
+			var a wire.Authorize
+			if f.Type == wire.TypeAuthorize && f.Decode(&a) == nil {
+				c.Write(wire.Ack{ID: a.ID, OK: true}, time.Second)
+			}
+		}
+	}()
+}
+
+// TestANodeReportsOnlyItsOwnSessions: started and ended for a uuid the
+// node holds no ticket for (another node's session) reach neither billing
+// nor the session record, and do not end the other node's session.
+func TestANodeReportsOnlyItsOwnSessions(t *testing.T) {
+	st := fakestore.New()
+	rec := fakestore.NewRecorder()
+	h, pin := startHub(t, st, func(c *hub.Config) { c.Events, c.Audit = rec, rec })
+	a, aID := enrolled(t, h, st, pin, "tok-a")
+	b, _ := enrolled(t, h, st, pin, "tok-b")
+	ackAll(a)
+	if err := authorize(h, context.Background(), aID, "sess-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := b.Write(wire.Started{UUID: "sess-a"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Write(wire.Ended{UUID: "sess-a", Up: 1, Down: 2}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		e, err := rec.Wait("relay_node.unknown_session", 2*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Fields["uuid"] != "sess-a" {
+			t.Fatalf("audit %v", e.Fields)
+		}
+	}
+	for len(rec.C) > 0 {
+		if e := <-rec.C; e.Kind == "started" || e.Kind == "ended" {
+			t.Fatalf("another node's report reached the events: %+v", e)
+		}
+	}
+	if !h.Tickets(aID).Admitted("sess-a", "111", "222") {
+		t.Fatal("another node's ended dropped the ticket")
+	}
+
+	if err := a.Write(wire.Started{UUID: "sess-a"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	e, err := rec.Wait("started", 2*time.Second)
+	if err != nil || e.Node != aID || e.UUID != "sess-a" {
+		t.Fatalf("own started: %+v, %v", e, err)
+	}
+	if err := a.Write(wire.Started{UUID: "sess-a"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rec.Wait("relay_node.unknown_session", 2*time.Second); err != nil {
+		t.Fatalf("a second started for a running session: %v", err)
+	}
+	if err := a.Write(wire.Ended{UUID: "sess-a"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if e, err := rec.Wait("ended", 2*time.Second); err != nil || e.Node != aID {
+		t.Fatalf("own ended: %+v, %v", e, err)
+	}
+}

@@ -2208,7 +2208,7 @@ func (s *Server) handleRelayResponseForward(msg *pb.RendezvousMessage, senderAdd
 	// peers keep the public relay to avoid NAT hairpin failures.
 	// The target dials the relay it named (rr.RelayServer) already: when
 	// that is a relay node, the ticket goes there and no fallback exists
-	route := s.chooseRelay(relayRouteRequest{base: s.getRelayServer(), a: senderAddr, b: initiatorAddr, relayHint: strings.TrimSpace(rr.RelayServer)})
+	route := s.chooseRelay(relayRouteRequest{base: s.getRelayServer(), a: senderAddr, b: initiatorAddr, initiatorID: initiatorID, targetID: targetID, targetIsA: true, relayHint: strings.TrimSpace(rr.RelayServer)})
 	if route.Tickets.Admitted(rr.Uuid, initiatorID, targetID) {
 		log.Printf("[signal] RelayResponse forward: uuid=%q initiator=%q target=%q was admitted already", rr.Uuid, initiatorID, targetID)
 	} else if refuse := s.admitSession(route.Tickets, rr.Uuid, initiatorID, targetID, s.panelAccount(initiatorAddr), s.panelSession(initiatorAddr)); refuse != "" {

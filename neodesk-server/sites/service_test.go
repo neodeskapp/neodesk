@@ -574,3 +574,43 @@ func TestSiteDeleteDropsRoutesAndHooksNodes(t *testing.T) {
 		t.Errorf("second delete: %v; want ErrNotFound", err)
 	}
 }
+
+// TestNodeForAddrAnswersOnlyWithThePairsOwnNodes: the relay address a
+// target names maps to a node only when that node may relay the pair. Two
+// organizations whose nodes share a LAN address, or a node that claims
+// the central relay's address, never get another organization's session.
+func TestNodeForAddrAnswersOnlyWithThePairsOwnNodes(t *testing.T) {
+	f := newFixture(t)
+	const shared = "192.168.1.10:21117"
+	const central = "203.0.113.1:21117"
+	s1 := f.site("org1", "one", "", netSpec{"192.168.0.0/16", private})
+	s2 := f.site("org2", "two", "", netSpec{"192.168.0.0/16", private})
+	n1 := f.node(s1.ID, shared, central)
+	n2 := f.node(s2.ID, shared, "198.51.100.2:21117")
+	f.device("A1", "org1")
+	f.device("A2", "org1")
+	f.device("B1", "org2")
+	f.device("B2", "org2")
+	f.device("C1", "org3")
+	f.device("C2", "org3")
+	lan1, lan2 := net.ParseIP("192.168.1.20"), net.ParseIP("192.168.1.21")
+
+	n, ia, ta, ok := f.svc.NodeForAddr("B1", lan1, "B2", lan2, shared)
+	if !ok || n.ID != n2.ID || ia != shared || ta != shared {
+		t.Fatalf("org2 pair: node %v %q %q %v; want org2's node", n, ia, ta, ok)
+	}
+	n, _, _, ok = f.svc.NodeForAddr("A1", lan1, "A2", lan2, shared)
+	if !ok || n.ID != n1.ID {
+		t.Fatalf("org1 pair: node %v %v; want org1's node", n, ok)
+	}
+	pub1, pub2 := net.ParseIP("192.0.2.10"), net.ParseIP("192.0.2.11")
+	if n, _, _, ok := f.svc.NodeForAddr("C1", pub1, "C2", pub2, central); ok {
+		t.Fatalf("org3 pair naming the central relay got node %s", n.ID)
+	}
+	if n, _, _, ok := f.svc.NodeForAddr("B1", lan1, "B2", lan2, central); ok {
+		t.Fatalf("org2 pair got org1's node %s by its public address", n.ID)
+	}
+	if n, _, _, ok := f.svc.NodeForAddr("A1", lan1, "B2", lan2, shared); ok {
+		t.Fatalf("pair across organizations got node %s", n.ID)
+	}
+}

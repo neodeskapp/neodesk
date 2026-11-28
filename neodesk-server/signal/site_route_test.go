@@ -42,8 +42,11 @@ func (f *fakeSiteRouter) NodeRoute(initiatorID string, _ net.IP, targetID string
 	return NodeRelay{}, false
 }
 
-func (f *fakeSiteRouter) NodeForAddr(addr string) (NodeRelay, bool) {
-	if addr == nodeTargetAddr || addr == nodeInitiatorAddr {
+func (f *fakeSiteRouter) NodeForAddr(addr, initiatorID string, _ net.IP, targetID string, _ net.IP) (NodeRelay, bool) {
+	f.mu.Lock()
+	f.asked = append(f.asked, [2]string{initiatorID, targetID})
+	f.mu.Unlock()
+	if initiatorID == f.ini && targetID == f.tgt && addr == nodeTargetAddr {
 		return f.node(), true
 	}
 	return NodeRelay{}, false
@@ -192,7 +195,47 @@ func TestEveryRelayCallSiteUsesTheSiteNode(t *testing.T) {
 			t.Fatalf("initiator told relay %q, want %q", got, nodeInitiatorAddr)
 		}
 		f.expectNodeTicket(t)
+		f.router.mu.Lock()
+		defer f.router.mu.Unlock()
+		if n := len(f.router.asked); n == 0 || f.router.asked[n-1] != [2]string{"SITEINI1", "SITETGT1"} {
+			t.Fatalf("router asked %v, want the pair with the relay address", f.router.asked)
+		}
 	})
+}
+
+// TestARelayAddressOfAnotherPairStaysCentral: a target that names a node
+// address the router does not give its pair gets the central relay.
+func TestARelayAddressOfAnotherPairStaysCentral(t *testing.T) {
+	f := newSiteFixture(t, nil)
+	f.router.ini = "SOMEONE1"
+	f.srv.storePendingUUID("SITETGT1", f.iniA, "site-other", "SITEINI1")
+	f.srv.handleRelayResponseForward(&pb.RendezvousMessage{Union: &pb.RendezvousMessage_RelayResponse{
+		RelayResponse: &pb.RelayResponse{
+			SocketAddr: cryptopkg.EncodeAddr(f.iniA), Uuid: "site-other",
+			RelayServer: nodeTargetAddr, Union: &pb.RelayResponse_Id{Id: "SITETGT1"},
+		},
+	}}, f.tgtA)
+	if got := readUDPRendezvous(t, f.ini).GetRelayResponse().GetRelayServer(); got == nodeInitiatorAddr {
+		t.Fatalf("initiator told the node relay %q", got)
+	}
+	if len(f.router.store.issuedUUIDs()) != 0 {
+		t.Fatal("the node got a ticket for a pair it does not serve")
+	}
+	if len(f.central.issuedUUIDs()) == 0 {
+		t.Fatal("no central ticket")
+	}
+}
+
+// TestIsOwnRelay: the configured relay servers are the server's own.
+func TestIsOwnRelay(t *testing.T) {
+	srv, _ := newTestSignalServer(t, config.EnrollmentModeOpen)
+	srv.cfg.RelayServers = "relay.example.com:21117"
+	if !srv.IsOwnRelay("RELAY.example.com:21117") || !srv.IsOwnRelay(srv.getRelayServer()) {
+		t.Fatal("own relay address not recognized")
+	}
+	if srv.IsOwnRelay("10.0.0.5:21117") || srv.IsOwnRelay("") {
+		t.Fatal("a node address counted as the server's relay")
+	}
 }
 
 // TestADownNodeFallsBackToTheCentralRelay: when the node can't take the
