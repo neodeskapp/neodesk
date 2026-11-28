@@ -2444,7 +2444,9 @@
     "action_site_created": "Site created",
     "action_site_updated": "Site changed",
     "action_site_deleted": "Site deleted",
-    "action_site_networks_updated": "Site networks changed"
+    "action_site_networks_updated": "Site networks changed",
+    "action_relay_node_address_refused": "تم رفض عنوان عقدة الترحيل",
+    "action_relay_node_unknown_session": "تم تجاهل تقرير جلسة من عقدة الترحيل"
   },
   "generator": {
     "title": "مولّد وكيل الدعم",

@@ -2437,7 +2437,9 @@
     "action_site_created": "Standort erstellt",
     "action_site_updated": "Standort geändert",
     "action_site_deleted": "Standort gelöscht",
-    "action_site_networks_updated": "Netze des Standorts geändert"
+    "action_site_networks_updated": "Netze des Standorts geändert",
+    "action_relay_node_address_refused": "Adresse des Relay-Knotens abgewiesen",
+    "action_relay_node_unknown_session": "Sitzungsmeldung des Relay-Knotens ignoriert"
   },
   "generator": {
     "title": "NeoDesk Support Generator",

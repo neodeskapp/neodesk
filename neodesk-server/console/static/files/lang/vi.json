@@ -2443,7 +2443,9 @@
     "action_site_created": "Site created",
     "action_site_updated": "Site changed",
     "action_site_deleted": "Site deleted",
-    "action_site_networks_updated": "Site networks changed"
+    "action_site_networks_updated": "Site networks changed",
+    "action_relay_node_address_refused": "Đã từ chối địa chỉ nút chuyển tiếp",
+    "action_relay_node_unknown_session": "Đã bỏ qua báo cáo phiên của nút chuyển tiếp"
   },
   "generator": {
     "title": "NeoDesk Support Generator",

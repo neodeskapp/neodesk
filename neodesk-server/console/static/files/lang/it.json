@@ -2437,7 +2437,9 @@
     "action_site_created": "Site created",
     "action_site_updated": "Site changed",
     "action_site_deleted": "Site deleted",
-    "action_site_networks_updated": "Site networks changed"
+    "action_site_networks_updated": "Site networks changed",
+    "action_relay_node_address_refused": "Indirizzo del nodo relay rifiutato",
+    "action_relay_node_unknown_session": "Segnalazione di sessione del nodo relay ignorata"
   },
   "generator": {
     "title": "NeoDesk Support Generator",

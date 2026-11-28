@@ -2443,7 +2443,9 @@
     "action_site_created": "Site created",
     "action_site_updated": "Site changed",
     "action_site_deleted": "Site deleted",
-    "action_site_networks_updated": "Site networks changed"
+    "action_site_networks_updated": "Site networks changed",
+    "action_relay_node_address_refused": "Адресу вузла ретрансляції відхилено",
+    "action_relay_node_unknown_session": "Звіт про сеанс від вузла ретрансляції проігноровано"
   },
   "generator": {
     "title": "NeoDesk Support Generator",
