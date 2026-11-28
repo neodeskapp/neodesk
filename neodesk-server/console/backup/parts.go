@@ -100,6 +100,8 @@ func (s *Service) plan(p paths) []planEntry {
 		planEntry{part: PartServerKeys, name: "goserver/id_ed25519", path: p.goPrivKey},
 		planEntry{part: PartServerKeys, name: "goserver/id_ed25519.pub", path: p.goPubKey},
 		planEntry{part: PartServerKeys, name: "goserver/.api_key", path: p.goAPIKey},
+		planEntry{part: PartServerKeys, name: "goserver/node_control.crt", path: p.nodeControlCert},
+		planEntry{part: PartServerKeys, name: "goserver/node_control.key", path: p.nodeControlKey},
 		planEntry{part: PartDatabaseFile, name: "goserver/db_v2.sqlite3", path: p.goDB},
 		planEntry{part: PartMeshCert, name: "goserver/mesh_agent_server.pem", path: p.meshAgentCert},
 	)
