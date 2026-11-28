@@ -3986,6 +3986,7 @@ function Check-PortStatus {
 # without an API server setting calls (the signal port minus 2, 21114:
 # callers from other hosts get only the client API there), RustDesk's (NAT
 # test, signal TCP and UDP, relay), the client API port, the CDAP gateway (21122) while CDAP is on,
+# the relay nodes' control port (NODE_CONTROL_PORT, 21123, 0 is off),
 # and the console's ports unless TLS ends at a reverse proxy (TRUST_PROXY).
 function Get-FirewallPorts {
     $signal = [int](Get-SignalPort)
@@ -4003,6 +4004,9 @@ function Get-FirewallPorts {
     if ((Get-ConsoleEnvValue -Key "CDAP_ENABLED") -notmatch '^(?i)(n|no|0|false|off)$') {
         $ports += @{Port = 21122; Proto = "TCP"; Name = "NeoDesk CDAP gateway"}
     }
+    $control = Get-ConsoleEnvValue -Key "NODE_CONTROL_PORT"
+    if (-not $control) { $control = "21123" }
+    if ($control -ne "0") { $ports += @{Port = [int]$control; Proto = "TCP"; Name = "NeoDesk relay node control"} }
     if (Test-BehindProxy) { return $ports }
     $http = Get-ConsoleEnvValue -Key "CONSOLE_PORT"
     if (-not $http) { $http = "3375" }

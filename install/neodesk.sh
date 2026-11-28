@@ -6675,6 +6675,9 @@ firewall_ports() {
     echo "$(read_effective_console_setting API_PORT "${CLIENT_API_PORT:-21121}")/tcp"
     value=$(read_effective_console_setting CDAP_ENABLED Y | tr '[:upper:]' '[:lower:]')
     case "$value" in n|no|0|false|off) ;; *) echo "21122/tcp" ;; esac
+    # relay nodes of sites connect to NODE_CONTROL_PORT; 0 turns it off
+    port=$(read_effective_console_setting NODE_CONTROL_PORT 21123)
+    [ "$port" = 0 ] || echo "$port/tcp"
     value=$(read_effective_console_setting TRUST_PROXY false | tr '[:upper:]' '[:lower:]')
     case "$value" in y|yes|1|true|on) return 0 ;; esac
     port=$(resolve_panel_http_port)

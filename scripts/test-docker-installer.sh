@@ -1242,7 +1242,7 @@ fw_rules() {
 # opens nothing twice.
 test_firewall_follows_what_it_serves() (
     local fw out clients first up
-    clients="21114/tcp 21115/tcp 21116/tcp 21116/udp 21117/tcp 21118/tcp 21119/tcp 21121/tcp 21122/tcp"
+    clients="21114/tcp 21115/tcp 21116/tcp 21116/udp 21117/tcp 21118/tcp 21119/tcp 21121/tcp 21122/tcp 21123/tcp"
     sorted() { printf '%s\n' "$@" | sort -u | tr '\n' ' '; }
     for fw in ufw firewalld; do
         load
