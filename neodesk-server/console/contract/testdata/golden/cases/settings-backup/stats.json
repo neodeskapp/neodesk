@@ -175,7 +175,7 @@
         "secret": true
        },
        {
-        "files": 3,
+        "files": 5,
         "id": "server_keys",
         "included": true,
         "secret": true
@@ -194,9 +194,10 @@
         "secret": false
        },
        {
-        "files": 20,
+        "files": 0,
         "id": "chat_files",
-        "included": true,
+        "included": false,
+        "reason": "empty",
         "secret": false
        },
        {

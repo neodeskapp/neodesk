@@ -79,153 +79,7 @@
   },
   {
    "roles": [
-    "server_admin"
-   ],
-   "status": 200,
-   "headers": {
-    "cache-control": "no-cache, no-store, must-revalidate",
-    "content-encoding": "gzip",
-    "content-security-policy": "default-src 'self';script-src 'self';script-src-attr 'none';style-src 'self' 'unsafe-inline';font-src 'self';img-src 'self' data: blob:;media-src 'self' blob:;connect-src 'self' ws:;frame-src 'none';object-src 'none';worker-src 'self' blob:;base-uri 'self';form-action 'self';frame-ancestors 'none'",
-    "content-type": "application/json; charset=utf-8",
-    "cross-origin-resource-policy": "same-origin",
-    "etag": "<present>",
-    "permissions-policy": "geolocation=(), microphone=(self), camera=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=()",
-    "ratelimit-limit": "1000000",
-    "ratelimit-policy": "1000000;w=60",
-    "ratelimit-remaining": "<n>",
-    "ratelimit-reset": "<n>",
-    "referrer-policy": "strict-origin-when-cross-origin",
-    "set-cookie": [
-     "__csrf_h=<value>; Path=/; HttpOnly; SameSite=Lax",
-     "nd.sid=<value>; Path=/; Expires=<date>; HttpOnly; SameSite=Lax"
-    ],
-    "vary": "Accept-Encoding",
-    "x-content-type-options": "nosniff",
-    "x-dns-prefetch-control": "off",
-    "x-download-options": "noopen",
-    "x-frame-options": "DENY",
-    "x-permitted-cross-domain-policies": "none",
-    "x-xss-protection": "0"
-   },
-   "body": {
-    "kind": "json",
-    "json": {
-     "data": {
-      "addressBooks": 0,
-      "backend": "neodesk",
-      "components": {
-       "consoleDb": true,
-       "env": false,
-       "goApiKey": true,
-       "goDb": true,
-       "goPrivKey": true,
-       "goPubKey": true,
-       "meshAgentCert": true,
-       "sessionSecret": false,
-       "uploads": 0
-      },
-      "dbType": "sqlite",
-      "deviceGroups": 7,
-      "folders": 4,
-      "parts": [
-       {
-        "files": 1,
-        "id": "database",
-        "included": true,
-        "secret": true
-       },
-       {
-        "files": 1,
-        "id": "server_data",
-        "included": true,
-        "secret": false
-       },
-       {
-        "files": 2,
-        "id": "database_file",
-        "included": true,
-        "secret": true
-       },
-       {
-        "files": 0,
-        "id": "env",
-        "included": false,
-        "reason": "docker",
-        "secret": true
-       },
-       {
-        "files": 0,
-        "id": "session_secret",
-        "included": false,
-        "reason": "environment",
-        "secret": true
-       },
-       {
-        "files": 3,
-        "id": "server_keys",
-        "included": true,
-        "secret": true
-       },
-       {
-        "files": 1,
-        "id": "mesh_cert",
-        "included": true,
-        "secret": true
-       },
-       {
-        "files": 0,
-        "id": "uploads",
-        "included": false,
-        "reason": "empty",
-        "secret": false
-       },
-       {
-        "files": 0,
-        "id": "chat_files",
-        "included": false,
-        "reason": "empty",
-        "secret": false
-       },
-       {
-        "files": 0,
-        "id": "attachments",
-        "included": false,
-        "reason": "empty",
-        "secret": false
-       },
-       {
-        "files": 0,
-        "id": "fonts",
-        "included": false,
-        "reason": "empty",
-        "secret": false
-       },
-       {
-        "files": 0,
-        "id": "public_endpoints",
-        "included": false,
-        "reason": "missing",
-        "secret": false
-       },
-       {
-        "files": 0,
-        "id": "tls",
-        "included": false,
-        "reason": "not_configured",
-        "secret": true
-       }
-      ],
-      "settings": 2,
-      "strategies": 0,
-      "userGroups": 1,
-      "users": 12
-     },
-     "success": true
-    }
-   }
-  },
-  {
-   "roles": [
+    "server_admin",
     "super_admin"
    ],
    "status": 200,
@@ -308,7 +162,7 @@
         "secret": true
        },
        {
-        "files": 3,
+        "files": 5,
         "id": "server_keys",
         "included": true,
         "secret": true
@@ -362,7 +216,7 @@
         "secret": true
        }
       ],
-      "settings": 3,
+      "settings": 2,
       "strategies": 0,
       "userGroups": 1,
       "users": 12
@@ -455,7 +309,7 @@
         "secret": true
        },
        {
-        "files": 3,
+        "files": 5,
         "id": "server_keys",
         "included": true,
         "secret": true
@@ -509,7 +363,7 @@
         "secret": true
        }
       ],
-      "settings": 5,
+      "settings": 4,
       "strategies": 0,
       "userGroups": 1,
       "users": 12
