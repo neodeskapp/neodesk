@@ -623,7 +623,7 @@
       ],
       "code": "en",
       "dir": "ltr",
-      "stringsUrl": "/api/console/strings/en?v=b8a07b181d943c70"
+      "stringsUrl": "/api/console/strings/en?v=f16b0a20da434f58"
      },
      "nav": [
       {
@@ -679,6 +679,16 @@
          "keywords": "ping monitor latency targets",
          "page": "network",
          "text": "Network monitoring"
+        },
+        {
+         "core": false,
+         "countId": null,
+         "external": false,
+         "group": "",
+         "href": "/sites",
+         "keywords": "sites offices locations relay nodes networks",
+         "page": "sites",
+         "text": "Sites"
         },
         {
          "core": false,
@@ -1483,7 +1493,7 @@
       ],
       "code": "en",
       "dir": "ltr",
-      "stringsUrl": "/api/console/strings/en?v=b8a07b181d943c70"
+      "stringsUrl": "/api/console/strings/en?v=f16b0a20da434f58"
      },
      "nav": [
       {
@@ -1559,6 +1569,16 @@
          "keywords": "ping monitor latency targets",
          "page": "network",
          "text": "Network monitoring"
+        },
+        {
+         "core": false,
+         "countId": null,
+         "external": false,
+         "group": "",
+         "href": "/sites",
+         "keywords": "sites offices locations relay nodes networks",
+         "page": "sites",
+         "text": "Sites"
         },
         {
          "core": false,
